@@ -1,28 +1,11 @@
-{-# LANGUAGE AllowAmbiguousTypes        #-}
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DeriveAnyClass             #-}
-{-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE DerivingStrategies         #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE NoImplicitPrelude          #-}
-{-# LANGUAGE PartialTypeSignatures      #-}
-{-# LANGUAGE RecordWildCards            #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE TemplateHaskell            #-}
-{-# LANGUAGE TypeApplications           #-}
-{-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE ViewPatterns               #-}
-
 module Platinum.Contracts.YieldFarming.OnChain where
 
 import           Control.Monad                  (void)
 import           Data.Aeson                     (FromJSON, ToJSON)
 import           GHC.Generics                   (Generic)
-import           Ledger                         (TxInfo (..), ScriptContext (..), Slot (..), AssetClass, Address, Datum(Datum), ScriptContext, TxOutTx, Validator, Value (..), PubKeyHash)
+import           Ledger                         (TxInfo (..), ScriptContext (..), Slot (..), Address,
+                                                 Datum(Datum), TxOutTx, Validator, Value (..), PubKeyHash)
+import           Plutus.V1.Ledger.Value         (AssetClass, TokenName, CurrencySymbol, assetClass, tokenName, singleton)
 import qualified Ledger
 import qualified Ledger.Ada                     as Ada
 import           Ledger.AddressMap              (UtxoMap)
@@ -49,7 +32,7 @@ import           Ledger.TimeSlot (posixTimeRangeToSlotRange)
 
 import           Platinum.Contracts.YieldFarming.Constants
 import           Platinum.Contracts.YieldFarming.Types
-import           Platinum.Contracts.Utils
+import           Platinum.Contracts.Utils (lookupDefault, guard)
 
 {-# INLINABLE stateTransition #-}
 stateTransition
@@ -57,25 +40,35 @@ stateTransition
     -> YieldFarmingRedeemer
     -> Maybe (TxConstraints Void Void, State YieldFarmingDatum)
 stateTransition s MkTransfer{..} = do
-    let YieldFarmingDatum{..} = stateData s
+    let datum = stateData s
     let curPoolValues = stateValue s
     -- TODO move it to tx somehow?
     let changes = flattenValue tAmount
-    flip mapM_ changes $ \(c, t, am) -> do
-        let ac = assetClass c t
-        guard (am + valueOf curPoolValues c t >= 0)
-        pool <- AMap.lookup ac yfdPools
-        newPool <- updatePool
-            (tSender, ac, tSlot)
-            (pool, assetClassValueOf curPoolValues ac)
-        Just ()
-        -- TODO recompute user debt
-    --user <- AMap.lookup tSender yfdUsers
-    --let updatedUser = UserInfo {uiRewardExcess = 0, uiAmount = uiAmount user + tAmount}
-    --AMap.insert tSender updatedUser yfdUsers
-    Just
-        (mempty,
-         State emptyYieldFarmingDatum (curPoolValues <> tAmount))
+    let handleAssetClass
+            :: YieldFarmingDatum
+            -> (CurrencySymbol, TokenName, Integer)
+            -> Maybe YieldFarmingDatum
+        handleAssetClass yd (c, t, am) = do
+            let ac = assetClass c t
+            pool <- AMap.lookup ac $ yfdPools yd
+            updatedPool <- updatePool
+                (tSender, ac, tSlot)
+                (pool, assetClassValueOf curPoolValues ac)
+            let user = lookupDefault (UserInfo (fromInteger 0) mempty) tSender (yfdUsers yd)
+            -- Check if a user has enough funds
+            let newUserAmount = am + assetClassValueOf (uiAmount user) ac
+            guard (newUserAmount >= 0)
+            let updatedUser = UserInfo {
+                    uiRewardExcess = fromInteger newUserAmount * piRewardsPerShare updatedPool,
+                    uiAmount = singleton c t am <> uiAmount user
+                }
+            Just $ YieldFarmingDatum {
+                yfdPools = AMap.insert ac updatedPool $ yfdPools yd,
+                yfdUsers = if (newUserAmount > 0) then AMap.insert tSender updatedUser $ yfdUsers yd
+                           else AMap.delete tSender (yfdUsers yd)
+            }
+    newDatum <- foldlM handleAssetClass datum changes
+    Just (mempty, State newDatum (curPoolValues <> tAmount))
 
 {-# INLINABLE updatePool #-}
 updatePool :: (PubKeyHash, AssetClass, Slot) -> (PoolInfo, Integer) -> Maybe PoolInfo

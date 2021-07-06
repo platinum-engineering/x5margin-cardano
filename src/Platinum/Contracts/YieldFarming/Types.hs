@@ -31,25 +31,6 @@
 -- We will call (Σ_1 + Σ_2 + ... + Σ_{i-1}) * S_i as rewardExcess_i, in a sense it's a delta
 -- which has to be subtracted to get correct reward for some block segment where balance (S_i) was constant.
 
-{-# LANGUAGE AllowAmbiguousTypes        #-}
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DeriveAnyClass             #-}
-{-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE DerivingStrategies         #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE NoImplicitPrelude          #-}
-{-# LANGUAGE PartialTypeSignatures      #-}
-{-# LANGUAGE RecordWildCards            #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE TemplateHaskell            #-}
-{-# LANGUAGE TypeApplications           #-}
-{-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE ViewPatterns               #-}
-
 module Platinum.Contracts.YieldFarming.Types where
 
 import qualified PlutusTx
@@ -70,14 +51,14 @@ data UserInfo = UserInfo {
 
 data YieldFarmingDatum = YieldFarmingDatum {
     yfdPools :: AMap.Map AssetClass PoolInfo,
-    yfdUsers :: AMap.Map AssetClass (AMap.Map PubKeyHash UserInfo)
+    yfdUsers :: AMap.Map PubKeyHash UserInfo
 }
 
 emptyYieldFarmingDatum :: YieldFarmingDatum
 emptyYieldFarmingDatum = YieldFarmingDatum {
     yfdPools = AMap.empty,
     yfdUsers = AMap.empty
-    }
+}
 
 data YieldFarmingRedeemer
     -- Either deposit or withdrawal for several asset classes
