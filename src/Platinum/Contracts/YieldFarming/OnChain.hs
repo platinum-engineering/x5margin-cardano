@@ -1,38 +1,18 @@
 module Platinum.Contracts.YieldFarming.OnChain where
 
-import           Control.Monad                  (void)
-import           Data.Aeson                     (FromJSON, ToJSON)
-import           GHC.Generics                   (Generic)
-import           Ledger                         (TxInfo (..), ScriptContext (..), Slot (..), Address,
-                                                 Datum(Datum), TxOutTx, Validator, Value (..), PubKeyHash)
-import           Plutus.V1.Ledger.Value         (AssetClass, TokenName, CurrencySymbol, assetClass, tokenName, singleton, assetClassValue)
-import qualified Ledger
-import qualified Ledger.Ada                     as Ada
-import           Ledger.AddressMap              (UtxoMap)
+import           Ledger                         (PubKeyHash, ScriptContext (..), Slot (..), Validator)
+import           Plutus.V1.Ledger.Value         (Value, AssetClass, TokenName, CurrencySymbol, assetClass,
+                                                 singleton, assetClassValue, flattenValue, assetClassValueOf)
 import qualified Ledger.Constraints             as Con
 import qualified Ledger.Typed.Scripts           as Scripts
-import           Plutus.Contract
 import           Plutus.Contract.Schema         ()
-import           Plutus.Trace.Emulator          (EmulatorTrace, observableState)
-import qualified Plutus.Trace.Emulator          as Trace
 import qualified PlutusTx
 import           PlutusTx.Ratio                 (truncate)
-import           Plutus.V1.Ledger.Value         (flattenValue, valueOf, assetClass, assetClassValueOf)
 import           PlutusTx.Prelude
-import           Schema                         (ToArgument, ToSchema)
-import           Wallet.Emulator                (Wallet (..))
-
-import qualified Data.ByteString.Char8          as C
-import qualified Prelude
-import           Data.Maybe                     (catMaybes)
-import           Data.Void                      (Void)
-import qualified Control.Monad.Freer.Extras.Log as Extras
 import qualified PlutusTx.AssocMap              as AMap
 import           Plutus.Contract.StateMachine
-import           Ledger.TimeSlot (posixTimeRangeToSlotRange)
 
 import           Platinum.Contracts.YieldFarming.Constants
-import           Platinum.Contracts.YieldFarming.Types
 import           Platinum.Contracts.Utils (lookupDefault, guard)
 
 {-# INLINABLE stateTransition #-}
@@ -53,9 +33,7 @@ stateTransition StringConstants{..} s MkTransfer{..} = do
         handleAssetClass (constraints, yd) (c, t, am) = do
             let ac = assetClass c t
             pool <- AMap.lookup ac $ yfdPools yd
-            updatedPool <- updatePool
-                (tSender, ac, tSlot)
-                (pool, assetClassValueOf curPoolValues ac)
+            updatedPool <- updatePool tSlot (pool, assetClassValueOf curPoolValues ac)
             let user = lookupDefault (UserInfo (fromInteger 0) mempty) tSender (yfdUsers yd)
             let userAmount = assetClassValueOf (uiAmount user) ac
             -- Check if a user has enough funds
@@ -83,8 +61,9 @@ stateTransition StringConstants{..} s MkTransfer{..} = do
     Just (constraints, State newDatum (curPoolValues <> tAmount))
 
 {-# INLINABLE updatePool #-}
-updatePool :: (PubKeyHash, AssetClass, Slot) -> (PoolInfo, Integer) -> Maybe PoolInfo
-updatePool (sender, asset, slot) (pInfo, totalSupplyInPool)
+-- TODO consider a case when a pool is empty
+updatePool :: Slot -> (PoolInfo, Integer) -> Maybe PoolInfo
+updatePool slot (pInfo, totalSupplyInPool)
   | piSlotWhenRewardUpdated pInfo > slot = Nothing
   | otherwise = Just $ PoolInfo {
      piRewardsPerShare =
@@ -95,16 +74,16 @@ updatePool (sender, asset, slot) (pInfo, totalSupplyInPool)
 
 {-# INLINABLE domainChecks #-}
 domainChecks :: YieldFarmingDatum -> YieldFarmingRedeemer -> ScriptContext -> Bool
-domainChecks YieldFarmingDatum{..} MkTransfer{..} ctx =
+domainChecks _ _ _ =
     -- check slot correspondence
-    let txInfo = scriptContextTxInfo ctx in
-    let validRange = posixTimeRangeToSlotRange (txInfoValidRange txInfo) in
+    -- let txInfo = scriptContextTxInfo ctx in
+    -- let validRange = posixTimeRangeToSlotRange (txInfoValidRange txInfo) in
 
-    -- check supported pools
-    -- check valid amounts
-    -- let supportedLiqPools = getValue yfdPoolsBalances in
-        -- AMap.fromList $ Ledger.flattenValue $ yfdPoolsBalances datum in
-    -- let changes = Ledger.flattenValues amount in
+    -- -- check supported pools
+    -- -- check valid amounts
+    -- -- let supportedLiqPools = getValue yfdPoolsBalances in
+    --     -- AMap.fromList $ Ledger.flattenValue $ yfdPoolsBalances datum in
+    -- -- let changes = Ledger.flattenValues amount in
     True
 
 -- {-# INLINABLE areAssetClassesSupported #-}
@@ -112,6 +91,7 @@ domainChecks YieldFarmingDatum{..} MkTransfer{..} ctx =
 -- areAssetClassesSupported :: YieldFarmingDatum -> Value -> Maybe (CurrencySymbol, TokenName)
 -- areAssetClassesSupported datum amount = undefined
 
+{-# INLINABLE yieldFarmingStateMachine #-}
 yieldFarmingStateMachine :: StringConstants -> StateMachine YieldFarmingDatum YieldFarmingRedeemer
 yieldFarmingStateMachine consts@StringConstants{..} = StateMachine
     { smTransition  = stateTransition consts
@@ -134,7 +114,59 @@ yieldFarmingInstance = Scripts.mkTypedValidator @YieldFarming
 yieldFarmingValidator :: Validator
 yieldFarmingValidator = Scripts.validatorScript yieldFarmingInstance
 
+
+----------------------------------------------------------------
+--- TYPES
+----------------------------------------------------------------
+
+-- For some reason types have to be defined at the same file as yieldFarmingInstance
+-- to avoid error 'GHC Core to PLC plugin: E042:Error: Unsupported feature: Kind: *'.
+
+data PoolInfo = PoolInfo {
+    piRewardsPerShare       :: !Rational,
+    piSlotWhenRewardUpdated :: !Slot
+}
+
+data UserInfo = UserInfo {
+    uiRewardExcess :: !Rational,
+    uiAmount       :: !Value
+}
+
+
+data YieldFarmingDatum = YieldFarmingDatum {
+    yfdPools :: AMap.Map AssetClass PoolInfo,
+    yfdUsers :: AMap.Map PubKeyHash UserInfo
+}
+
+{-# INLINABLE emptyYieldFarmingDatum #-}
+emptyYieldFarmingDatum :: YieldFarmingDatum
+emptyYieldFarmingDatum = YieldFarmingDatum {
+    yfdPools = AMap.empty,
+    yfdUsers = AMap.empty
+}
+
+data YieldFarmingRedeemer
+    -- Either deposit or withdrawal for several asset classes
+    = MkTransfer {
+        tSender :: !PubKeyHash,
+        tAmount :: !Value,
+        -- | Slot when the operation should performed
+        tSlot   :: !Slot
+    }
+
 data YieldFarming
 instance Scripts.ValidatorTypes YieldFarming where
     type instance RedeemerType YieldFarming = YieldFarmingRedeemer
     type instance DatumType YieldFarming = YieldFarmingDatum
+
+PlutusTx.unstableMakeIsData ''PoolInfo
+PlutusTx.makeLift ''PoolInfo
+
+PlutusTx.unstableMakeIsData ''UserInfo
+PlutusTx.makeLift ''UserInfo
+
+PlutusTx.unstableMakeIsData ''YieldFarmingRedeemer
+PlutusTx.makeLift ''YieldFarmingRedeemer
+
+PlutusTx.unstableMakeIsData ''YieldFarmingDatum
+PlutusTx.makeLift ''YieldFarmingDatum

@@ -5,6 +5,7 @@ import qualified PlutusTx
 import PlutusTx.Prelude
 
 -- | How far away requested withdrawal slot might be. In slots
+{-# INLINABLE requestValidityIntervalLength #-}
 requestValidityIntervalLength :: Integer
 requestValidityIntervalLength = 20
 
@@ -33,4 +34,5 @@ stringConstants = StringConstants
       scThreadToken = threadToken
     }
 
+PlutusTx.unstableMakeIsData ''StringConstants
 PlutusTx.makeLift ''StringConstants
