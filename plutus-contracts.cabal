@@ -1,5 +1,5 @@
 cabal-version:      2.4
-name:               plutus-starter
+name:               plutus-contracts
 version:            0.1.0.0
 
 -- A short (one-line) description of the package.
@@ -23,8 +23,10 @@ maintainer:         Your email
 
 library
     exposed-modules:
-      MyModule
-      Plutus.Contracts.Game
+      Platinum.Contracts.YieldFarming.Constants
+      Platinum.Contracts.YieldFarming.OnChain
+      Platinum.Contracts.YieldFarming.Types
+      Platinum.Contracts.Utils
     build-depends:
       base >= 4.9 && < 5,
       aeson,
@@ -35,19 +37,18 @@ library
       plutus-contract,
       plutus-tx-plugin,
       plutus-tx,
-      plutus-ledger
+      plutus-ledger,
+      plutus-ledger-api
     hs-source-dirs: src examples/src
     default-language: Haskell2010
     ghc-options:
             -- See Plutus Tx readme
             -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas
 
-test-suite plutus-example-projects-test
+test-suite plutus-contracts-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   hs-source-dirs: examples/test
-  other-modules:
-    Spec.Game
   default-language: Haskell2010
   ghc-options: -Wall -Wnoncanonical-monad-instances
               -Wincomplete-uni-patterns -Wincomplete-record-updates
@@ -59,25 +60,9 @@ test-suite plutus-example-projects-test
     plutus-tx-plugin,
     plutus-contract -any,
     plutus-ledger -any,
-    plutus-starter -any
+    plutus-contracts -any
   build-depends:
     base >=4.9 && <5,
     tasty -any,
     tasty-hunit -any,
     tasty-hedgehog >=0.2.0.0
-
-executable plutus-starter-pab
-  main-is: Main.hs
-  hs-source-dirs: pab
-  ghc-options:
-    -threaded
-  build-depends:
-    base >= 4.9 && < 5,
-    plutus-contract -any,
-    plutus-pab -any,
-    plutus-starter -any,
-    aeson -any,
-    freer-simple -any,
-    prettyprinter -any,
-    freer-extras -any,
-    plutus-ledger -any
