@@ -2,7 +2,7 @@ module Platinum.Contracts.YieldFarming.OnChain where
 
 import           Ledger                         (PubKeyHash, ScriptContext (..), Slot (..), Validator)
 import           Plutus.V1.Ledger.Value         (Value, AssetClass, TokenName, CurrencySymbol, assetClass,
-                                                 singleton, assetClassValue, flattenValue, assetClassValueOf)
+                                                 assetClassValue, flattenValue, assetClassValueOf)
 import qualified Ledger.Constraints             as Con
 import qualified Ledger.Typed.Scripts           as Scripts
 import           Plutus.Contract.Schema         ()
@@ -21,9 +21,10 @@ stateTransition
     -> State YieldFarmingDatum
     -> YieldFarmingRedeemer
     -> Maybe (TxConstraints Void Void, State YieldFarmingDatum)
-stateTransition StringConstants{..} s MkTransfer{..} = do
+stateTransition consts s MkTransfer{..} = do
     let datum = stateData s
     let curPoolValues = stateValue s
+    -- TODO must be signed by tSender?
     -- TODO move it to tx somehow?
     let changes = flattenValue tAmount
     let handleAssetClass
@@ -33,35 +34,30 @@ stateTransition StringConstants{..} s MkTransfer{..} = do
         handleAssetClass (constraints, yd) (c, t, am) = do
             let ac = assetClass c t
             pool <- AMap.lookup ac $ yfdPools yd
+            -- Update pool's rewared-per-share and last slot with submitted slot
             updatedPool <- updatePool tSlot (pool, assetClassValueOf curPoolValues ac)
-            let user = lookupDefault (UserInfo (fromInteger 0) mempty) tSender (yfdUsers yd)
-            let userAmount = assetClassValueOf (uiAmount user) ac
-            -- Check if a user has enough funds
-            let newUserAmount = am + userAmount
-            guard (newUserAmount >= 0)
-            let outstandingReward =
-                    assetClassValue (scRewardAssetClass) $
-                        truncate $ fromInteger userAmount * piRewardsPerShare updatedPool - uiRewardExcess user
-            let newConstraints = constraints <>
-                    if (userAmount > 0) then Con.mustPayToPubKey tSender outstandingReward
-                    else mempty
-            let updatedUser = UserInfo {
-                    uiRewardExcess = fromInteger newUserAmount * piRewardsPerShare updatedPool,
-                    uiAmount = singleton c t am <> uiAmount user
-                }
-            return $ (
-                newConstraints,
+            (userConstraint, newUsers) <-
+                handleAssetClassTransferNRewardUser
+                    consts
+                    tSender
+                    (ac, am)
+                    (piRewardsPerShare updatedPool)
+                    (yfdUsers yd)
+            return (
+                constraints <> userConstraint,
                 YieldFarmingDatum {
                     yfdPools = AMap.insert ac updatedPool $ yfdPools yd,
-                    yfdUsers =
-                        if (newUserAmount > 0) then AMap.insert tSender updatedUser $ yfdUsers yd
-                        else AMap.delete tSender (yfdUsers yd)
+                    yfdUsers = newUsers
+
                 })
     (constraints, newDatum) <- foldlM handleAssetClass (mempty, datum) changes
     Just (constraints, State newDatum (curPoolValues <> tAmount))
 
-{-# INLINABLE updatePool #-}
 -- TODO consider a case when a pool is empty
+-- | Recompute reward-per-share value: add accumulated reward between
+-- last known slot and current slot.
+-- Also update last known slot.
+{-# INLINABLE updatePool #-}
 updatePool :: Slot -> (PoolInfo, Integer) -> Maybe PoolInfo
 updatePool slot (pInfo, totalSupplyInPool)
   | piSlotWhenRewardUpdated pInfo > slot = Nothing
@@ -71,6 +67,47 @@ updatePool slot (pInfo, totalSupplyInPool)
          getSlot (piSlotWhenRewardUpdated pInfo - slot) * rewardPerSlot % totalSupplyInPool,
      piSlotWhenRewardUpdated = slot
   }
+
+-- | Update user amount of current asset class.
+-- Also recompute user's reward correction in order to assess future reward payouts.
+{-# INLINABLE handleAssetClassTransferNRewardUser #-}
+handleAssetClassTransferNRewardUser
+    :: StringConstants
+    -- ^ String constants with scRewardAssetClass
+    -> PubKeyHash
+    -> (AssetClass, Integer)
+    -> Rational
+    -- ^ Reward per share of pool corresponding to asset class
+    -> AMap.Map PubKeyHash UserInfo
+    -> Maybe (TxConstraints Void Void, AMap.Map PubKeyHash UserInfo)
+handleAssetClassTransferNRewardUser StringConstants{..} sender (ac, transfered) rewardPerShare users = do
+    let user = lookupDefault (UserInfo (fromInteger 0) mempty) sender users
+    let userAmount = assetClassValueOf (uiAmount user) ac
+    -- Check if the user has enough funds after this transfer
+    let newUserAmount = userAmount + transfered
+    guard (newUserAmount >= 0)
+
+    -- Reward for current user amount for an interval of slots,
+    -- starting from the one, when the user deposited/withdrawn last time.
+    let outstandingReward =
+            assetClassValue scRewardAssetClass $
+                truncate $ fromInteger userAmount * rewardPerShare - uiRewardExcess user
+
+    -- Constraint for a transaction which transfer user's reward to them.
+    -- If user didn't have any tokens before then send nothing.
+    let userConstraint =
+            if (userAmount > 0) then Con.mustPayToPubKey sender outstandingReward
+            else mempty
+
+    let updatedUser = UserInfo {
+            uiRewardExcess = fromInteger newUserAmount * rewardPerShare,
+            uiAmount = assetClassValue ac transfered <> uiAmount user
+        }
+
+    -- Remove user from map, if there are no their token in the pool anymore.
+    let newUsers = if (newUserAmount > 0) then AMap.insert sender updatedUser users
+                   else AMap.delete sender users
+    return (userConstraint, newUsers)
 
 {-# INLINABLE domainChecks #-}
 domainChecks :: YieldFarmingDatum -> YieldFarmingRedeemer -> ScriptContext -> Bool
@@ -149,6 +186,9 @@ data YieldFarmingRedeemer
     -- Either deposit or withdrawal for several asset classes
     = MkTransfer {
         tSender :: !PubKeyHash,
+        -- | Amount to be transferred.
+        -- Amount corresponding to a specific asset class in Value
+        -- might be either deposit or withdrawal depending on amount sign.
         tAmount :: !Value,
         -- | Slot when the operation should performed
         tSlot   :: !Slot
