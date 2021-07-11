@@ -1,6 +1,9 @@
 module Platinum.Contracts.YieldFarming.OnChain where
 
-import           Ledger                         (PubKeyHash, ScriptContext (..), Slot (..), Validator)
+import           Ledger                         (PubKeyHash, ScriptContext (..), Slot (..), Validator,
+                                                 Extended (..), Interval (..), interval, member, txInfoValidRange,
+                                                 LowerBound (..))
+import           Ledger.TimeSlot                (posixTimeRangeToSlotRange)
 import           Plutus.V1.Ledger.Value         (Value, AssetClass, TokenName, CurrencySymbol, assetClass,
                                                  assetClassValue, flattenValue, assetClassValueOf)
 import qualified Ledger.Constraints             as Con
@@ -13,7 +16,7 @@ import qualified PlutusTx.AssocMap              as AMap
 import           Plutus.Contract.StateMachine
 
 import           Platinum.Contracts.YieldFarming.Constants
-import           Platinum.Contracts.Utils (lookupDefault, guard)
+import           Platinum.Contracts.Utils       (lookupDefault, guard)
 
 {-# INLINABLE stateTransition #-}
 stateTransition
@@ -24,7 +27,6 @@ stateTransition
 stateTransition consts s MkTransfer{..} = do
     let datum = stateData s
     let curPoolValues = stateValue s
-    -- TODO must be signed by tSender?
     -- TODO move it to tx somehow?
     let changes = flattenValue tAmount
     let handleAssetClass
@@ -51,9 +53,9 @@ stateTransition consts s MkTransfer{..} = do
 
                 })
     (constraints, newDatum) <- foldlM handleAssetClass (mempty, datum) changes
-    Just (constraints, State newDatum (curPoolValues <> tAmount))
+    Just (Con.mustBeSignedBy tSender <> constraints,
+          State newDatum (curPoolValues <> tAmount))
 
--- TODO consider a case when a pool is empty
 -- | Recompute reward-per-share value: add accumulated reward between
 -- last known slot and current slot.
 -- Also update last known slot.
@@ -64,7 +66,9 @@ updatePool slot (pInfo, totalSupplyInPool)
   | otherwise = Just $ PoolInfo {
      piRewardsPerShare =
          piRewardsPerShare pInfo +
-         getSlot (piSlotWhenRewardUpdated pInfo - slot) * rewardPerSlot % totalSupplyInPool,
+         if totalSupplyInPool > 0 then
+             getSlot (piSlotWhenRewardUpdated pInfo - slot) * rewardPerSlot % totalSupplyInPool
+         else fromInteger 0,
      piSlotWhenRewardUpdated = slot
   }
 
@@ -96,7 +100,7 @@ handleAssetClassTransferNRewardUser StringConstants{..} sender (ac, transfered) 
     -- Constraint for a transaction which transfer user's reward to them.
     -- If user didn't have any tokens before then send nothing.
     let userConstraint =
-            if (userAmount > 0) then Con.mustPayToPubKey sender outstandingReward
+            if userAmount > 0 then Con.mustPayToPubKey sender outstandingReward
             else mempty
 
     let updatedUser = UserInfo {
@@ -105,28 +109,24 @@ handleAssetClassTransferNRewardUser StringConstants{..} sender (ac, transfered) 
         }
 
     -- Remove user from map, if there are no their token in the pool anymore.
-    let newUsers = if (newUserAmount > 0) then AMap.insert sender updatedUser users
+    let newUsers = if newUserAmount > 0 then AMap.insert sender updatedUser users
                    else AMap.delete sender users
     return (userConstraint, newUsers)
 
 {-# INLINABLE domainChecks #-}
 domainChecks :: YieldFarmingDatum -> YieldFarmingRedeemer -> ScriptContext -> Bool
-domainChecks _ _ _ =
+domainChecks _ MkTransfer{..} ctx =
     -- check slot correspondence
-    -- let txInfo = scriptContextTxInfo ctx in
-    -- let validRange = posixTimeRangeToSlotRange (txInfoValidRange txInfo) in
+    traceIfFalse "tSlot is out of acceptable bounds" slotInAcceptableBounds
+  where
+      txInfo = scriptContextTxInfo ctx
+      validRange = posixTimeRangeToSlotRange (txInfoValidRange txInfo)
 
-    -- -- check supported pools
-    -- -- check valid amounts
-    -- -- let supportedLiqPools = getValue yfdPoolsBalances in
-    --     -- AMap.fromList $ Ledger.flattenValue $ yfdPoolsBalances datum in
-    -- -- let changes = Ledger.flattenValues amount in
-    True
-
--- {-# INLINABLE areAssetClassesSupported #-}
--- | Return asset class which is not supported by the contract if any.
--- areAssetClassesSupported :: YieldFarmingDatum -> Value -> Maybe (CurrencySymbol, TokenName)
--- areAssetClassesSupported datum amount = undefined
+      -- lower bound must be finite and [lower bound; lower bound + 20] has to contain tSlot
+      slotInAcceptableBounds :: Bool
+      slotInAcceptableBounds = case ivFrom validRange of
+          LowerBound (Finite l) _ -> tSlot `member` interval l (l + Slot requestValidityIntervalLength)
+          _        -> False
 
 {-# INLINABLE yieldFarmingStateMachine #-}
 yieldFarmingStateMachine :: StringConstants -> StateMachine YieldFarmingDatum YieldFarmingRedeemer
