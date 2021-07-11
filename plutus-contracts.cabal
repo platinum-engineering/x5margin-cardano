@@ -39,6 +39,7 @@ library
       plutus-tx,
       plutus-ledger,
       plutus-ledger-api,
+      plutus-use-cases,
       text
     hs-source-dirs: src
     default-language: Haskell2010

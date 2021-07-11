@@ -8,6 +8,7 @@ import           GHC.Generics                 (Generic)
 import           Control.Monad                hiding (fmap)
 import           Schema                       (ToSchema)
 
+import           Plutus.V1.Ledger.Value       (assetClass)
 import           Plutus.Contract.StateMachine
 import           PlutusTx.Prelude
 import           Plutus.Contract              as Contract
@@ -16,9 +17,10 @@ import           Ledger                       hiding (singleton)
 import           Plutus.V1.Ledger.Value       (assetClassValue)
 import           Playground.TH                (mkSchemaDefinitions)
 import           Prelude                      (Show (..))
+import qualified Plutus.Contracts.Currency     as UC
 
 import           Platinum.Contracts.YieldFarming.OnChain
-import           Platinum.Contracts.YieldFarming.Constants (stringConstants)
+import           Platinum.Contracts.YieldFarming.Constants (stringConstants, rewardTokenName)
 
 yfClient :: StateMachineClient YieldFarmingDatum YieldFarmingRedeemer
 yfClient =
@@ -29,6 +31,9 @@ yfClient =
 
 mapErrorSM :: Contract w s SMContractError a -> Contract w s Text a
 mapErrorSM = mapError $ pack . show
+
+mapErrorC :: Contract w s UC.CurrencyError a -> Contract w s Text a
+mapErrorC = mapError $ pack . show
 
 -------------------------------------------------
 -- Off-chain endpoints
@@ -43,17 +48,27 @@ initLP
     :: InitLPParams
     -> Contract w s Text ()
 initLP InitLPParams{..} = do
-    pkh <- pubKeyHash <$> Contract.ownPubKey
+    ownerPkh <- pubKeyHash <$> Contract.ownPubKey
+
+    -- Create reward tokens
+    -- Make initial emission of reward token
+    oneShotCur <- mapErrorC $ UC.forgeContract ownerPkh [(rewardTokenName, 1000000000)]
+    let rewardAssetClass = assetClass (UC.currencySymbol oneShotCur) rewardTokenName
+    logInfo $ "Reward tokens minted " ++ show rewardAssetClass
+
+    -- Create pool
+    -- TODO check that no RWRD asset class among ilpAssetClasses
     curSlot <- Contract.currentSlot
     let emptyPool = emptyPoolInfo curSlot
     let yfInitDatum =
            YieldFarmingDatum
            { yfdPools = AMap.fromList $ map (, emptyPool) ilpAssetClasses,
              yfdUsers = AMap.empty,
-             yfdOwner = pkh
+             yfdOwner = ownerPkh,
+             yfdRewardToken = rewardAssetClass
            }
-    void $ mapErrorSM $ runInitialise yfClient yfInitDatum mempty
-    logInfo $ "Started liquidity pool " ++ show yfInitDatum
+    void $ mapErrorSM $ runInitialise yfClient yfInitDatum (UC.forgedValue oneShotCur)
+    logInfo $ "Started liquidity pool with constant amount of reward tokens " ++ show yfInitDatum
 
 -------------------------------------------------
 -- On-chain endpoints

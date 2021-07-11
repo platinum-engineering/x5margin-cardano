@@ -21,11 +21,10 @@ import           Platinum.Contracts.Utils                  (lookupDefault, guard
 
 {-# INLINABLE stateTransition #-}
 stateTransition
-    :: StringConstants
-    -> State YieldFarmingDatum
+    :: State YieldFarmingDatum
     -> YieldFarmingRedeemer
     -> Maybe (TxConstraints Void Void, State YieldFarmingDatum)
-stateTransition consts s MkTransfer{..} = do
+stateTransition s MkTransfer{..} = do
     let datum = stateData s
     let curPoolValues = stateValue s
     -- TODO move it to tx somehow?
@@ -41,7 +40,7 @@ stateTransition consts s MkTransfer{..} = do
             updatedPool <- updatePool tSlot (pool, assetClassValueOf curPoolValues ac)
             (userConstraint, newUsers) <-
                 handleAssetClassTransferNRewardUser
-                    consts
+                    (yfdRewardToken datum)
                     tSender
                     (ac, am)
                     (piRewardsPerShare updatedPool)
@@ -51,8 +50,8 @@ stateTransition consts s MkTransfer{..} = do
                 YieldFarmingDatum {
                     yfdPools = AMap.insert ac updatedPool $ yfdPools yd,
                     yfdUsers = newUsers,
+                    yfdRewardToken = yfdRewardToken datum,
                     yfdOwner = yfdOwner datum
-
                 })
     (constraints, newDatum) <- foldlM handleAssetClass (mempty, datum) changes
     Just (Con.mustBeSignedBy tSender <> constraints,
@@ -74,20 +73,19 @@ updatePool slot (pInfo, totalSupplyInPool)
      piSlotWhenRewardUpdated = slot
   }
 
--- TODO emit actual transfers with constraints
 -- | Update user amount of current asset class.
 -- Also recompute user's reward correction in order to assess future reward payouts.
 {-# INLINABLE handleAssetClassTransferNRewardUser #-}
 handleAssetClassTransferNRewardUser
-    :: StringConstants
-    -- ^ String constants with scRewardAssetClass
+    :: AssetClass
+    -- ^ Asset class corresponding to reward token
     -> PubKeyHash
     -> (AssetClass, Integer)
     -> Rational
     -- ^ Reward per share of pool corresponding to asset class
     -> AMap.Map PubKeyHash UserInfo
     -> Maybe (TxConstraints Void Void, AMap.Map PubKeyHash UserInfo)
-handleAssetClassTransferNRewardUser StringConstants{..} sender (ac, transfered) rewardPerShare users = do
+handleAssetClassTransferNRewardUser rewardToken sender (ac, transfered) rewardPerShare users = do
     let user = lookupDefault (UserInfo (fromInteger 0) mempty) sender users
     let userAmount = assetClassValueOf (uiAmounts user) ac
     -- Check if the user has enough funds after this transfer
@@ -125,7 +123,7 @@ handleAssetClassTransferNRewardUser StringConstants{..} sender (ac, transfered) 
         -- Reward for current user amount for an interval of slots,
         -- starting from the one, when the user deposited/withdrawn last time.
         let outstandingReward =
-                assetClassValue scRewardAssetClass $
+                assetClassValue rewardToken $
                     truncate $ fromInteger userAmount * rewardPerShare - uiRewardExcess user in
 
         -- Constraint for a transaction which transfer user's reward to them.
@@ -150,8 +148,8 @@ domainChecks _ MkTransfer{..} ctx =
 
 {-# INLINABLE yieldFarmingStateMachine #-}
 yieldFarmingStateMachine :: StringConstants -> StateMachine YieldFarmingDatum YieldFarmingRedeemer
-yieldFarmingStateMachine consts@StringConstants{..} = StateMachine
-    { smTransition  = stateTransition consts
+yieldFarmingStateMachine StringConstants{..} = StateMachine
+    { smTransition  = stateTransition
     , smFinal       = const False
     , smCheck       = domainChecks
     , smThreadToken = Just scThreadToken
@@ -159,7 +157,7 @@ yieldFarmingStateMachine consts@StringConstants{..} = StateMachine
 
 {-# INLINABLE mkYieldFarmingValidator #-}
 mkYieldFarmingValidator :: StringConstants -> YieldFarmingDatum -> YieldFarmingRedeemer -> ScriptContext -> Bool
-mkYieldFarmingValidator sc = mkValidator (yieldFarmingStateMachine sc)
+mkYieldFarmingValidator = mkValidator . yieldFarmingStateMachine
 
 type YFS = StateMachine YieldFarmingDatum YieldFarmingRedeemer
 
@@ -199,18 +197,11 @@ data UserInfo = UserInfo {
 } deriving stock (Prelude.Show)
 
 data YieldFarmingDatum = YieldFarmingDatum {
-    yfdPools :: AMap.Map AssetClass PoolInfo,
-    yfdUsers :: AMap.Map PubKeyHash UserInfo,
-    yfdOwner :: PubKeyHash
+    yfdPools :: !(AMap.Map AssetClass PoolInfo),
+    yfdUsers :: !(AMap.Map PubKeyHash UserInfo),
+    yfdRewardToken :: !AssetClass,
+    yfdOwner       :: !PubKeyHash
 } deriving stock (Prelude.Show)
-
-{-# INLINABLE emptyYieldFarmingDatum #-}
-emptyYieldFarmingDatum :: PubKeyHash -> YieldFarmingDatum
-emptyYieldFarmingDatum owner = YieldFarmingDatum {
-    yfdPools = AMap.empty,
-    yfdUsers = AMap.empty,
-    yfdOwner = owner
-}
 
 data YieldFarmingRedeemer
     -- Either deposit or withdrawal for several asset classes

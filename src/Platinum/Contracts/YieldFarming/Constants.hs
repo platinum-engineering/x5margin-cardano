@@ -1,6 +1,6 @@
 module Platinum.Contracts.YieldFarming.Constants where
 
-import Plutus.V1.Ledger.Value (AssetClass, assetClass, tokenName)
+import Plutus.V1.Ledger.Value (AssetClass, assetClass, tokenName, TokenName)
 import qualified PlutusTx
 import PlutusTx.Prelude
 
@@ -13,25 +13,22 @@ requestValidityIntervalLength = 20
 rewardPerSlot :: Integer
 rewardPerSlot  = 100
 
-
-{-# INLINABLE rewardAssetClass #-}
-rewardAssetClass :: AssetClass
-rewardAssetClass = assetClass "" "RWRD"
+{-# INLINABLE rewardTokenName #-}
+rewardTokenName :: TokenName
+rewardTokenName = "LP_RWRD"
 
 {-# INLINABLE threadToken #-}
 threadToken :: AssetClass
-threadToken = assetClass "" (tokenName "PLATINUM_YIELD_FARM_ST_01")
+threadToken = assetClass "ff" (tokenName "PLATINUM_YIELD_FARM_THREAD_TOKEN")
 
 data StringConstants = StringConstants {
-    scRewardAssetClass :: !AssetClass,
     scThreadToken      :: !AssetClass
 }
 
 {-# INLINABLE stringConstants #-}
 stringConstants :: StringConstants
 stringConstants = StringConstants
-    { scRewardAssetClass = rewardAssetClass,
-      scThreadToken = threadToken
+    { scThreadToken = threadToken
     }
 
 PlutusTx.unstableMakeIsData ''StringConstants
