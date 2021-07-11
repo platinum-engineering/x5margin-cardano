@@ -23,8 +23,8 @@ threadToken :: AssetClass
 threadToken = assetClass "" (tokenName "PLATINUM_YIELD_FARM_ST_01")
 
 data StringConstants = StringConstants {
-    scRewardAssetClass :: AssetClass,
-    scThreadToken      :: AssetClass
+    scRewardAssetClass :: !AssetClass,
+    scThreadToken      :: !AssetClass
 }
 
 {-# INLINABLE stringConstants #-}
