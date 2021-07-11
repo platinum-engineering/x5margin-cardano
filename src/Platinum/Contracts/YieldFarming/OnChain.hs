@@ -89,33 +89,49 @@ handleAssetClassTransferNRewardUser
     -> Maybe (TxConstraints Void Void, AMap.Map PubKeyHash UserInfo)
 handleAssetClassTransferNRewardUser StringConstants{..} sender (ac, transfered) rewardPerShare users = do
     let user = lookupDefault (UserInfo (fromInteger 0) mempty) sender users
-    let userAmount = assetClassValueOf (uiAmount user) ac
+    let userAmount = assetClassValueOf (uiAmounts user) ac
     -- Check if the user has enough funds after this transfer
     let newUserAmount = userAmount + transfered
     guard (newUserAmount >= 0)
 
-    -- Reward for current user amount for an interval of slots,
-    -- starting from the one, when the user deposited/withdrawn last time.
-    let outstandingReward =
-            assetClassValue scRewardAssetClass $
-                truncate $ fromInteger userAmount * rewardPerShare - uiRewardExcess user
-
-    -- Constraint for a transaction which transfer user's reward to them.
-    -- If user didn't have any tokens before then send nothing.
-    let userConstraint =
-            if userAmount > 0 then Con.mustPayToPubKey sender outstandingReward
-            else mempty
-
     let updatedUser = UserInfo {
             uiRewardExcess = fromInteger newUserAmount * rewardPerShare,
-            uiAmount = assetClassValue ac transfered <> uiAmount user
+            uiAmounts      = assetClassValue ac transfered <> uiAmounts user
         }
 
     -- Remove user from map, if there are no their token in the pool anymore.
     let newUsers =
             if newUserAmount > 0 then AMap.insert sender updatedUser users
             else AMap.delete sender users
-    return (userConstraint, newUsers)
+    return (transferTxConstraint <> rewardTxConstraint user, newUsers)
+  where
+    transferTxConstraint :: TxConstraints Void Void
+    transferTxConstraint
+        -- Can't do
+        --     Con.mustPayToTheScript sender $ assetClassValue ac transfered
+        -- because out type of TxConstraints becomes PubKeyHash,
+        -- and it doesn't match with TxConstraints Void Void of 'smTransition'.
+        | transfered > 0 = mempty
+        | transfered < 0 =
+            Con.mustPayToPubKey sender $ assetClassValue ac (negate transfered)
+        | otherwise = mempty
+
+    -- | Build TxContraint which checks that user is paid a reward
+    -- for currently stacked amount
+    rewardTxConstraint :: UserInfo -> TxConstraints Void Void
+    rewardTxConstraint user =
+        let userAmount = assetClassValueOf (uiAmounts user) ac in
+
+        -- Reward for current user amount for an interval of slots,
+        -- starting from the one, when the user deposited/withdrawn last time.
+        let outstandingReward =
+                assetClassValue scRewardAssetClass $
+                    truncate $ fromInteger userAmount * rewardPerShare - uiRewardExcess user in
+
+        -- Constraint for a transaction which transfer user's reward to them.
+        -- If user didn't have any tokens before then send nothing.
+        if userAmount > 0 then Con.mustPayToPubKey sender outstandingReward
+        else mempty
 
 {-# INLINABLE domainChecks #-}
 domainChecks :: YieldFarmingDatum -> YieldFarmingRedeemer -> ScriptContext -> Bool
@@ -179,7 +195,7 @@ emptyPoolInfo creationSlot = PoolInfo {
 
 data UserInfo = UserInfo {
     uiRewardExcess :: !Rational,
-    uiAmount       :: !Value
+    uiAmounts      :: !Value
 } deriving stock (Prelude.Show)
 
 data YieldFarmingDatum = YieldFarmingDatum {
