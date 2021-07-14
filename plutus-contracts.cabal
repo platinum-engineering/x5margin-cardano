@@ -24,6 +24,7 @@ maintainer:         Your email
 library
     exposed-modules:
       Platinum.Contracts.YieldFarming.Traces.Trace1
+      Platinum.Contracts.YieldFarming.Traces.Trace2
       Platinum.Contracts.YieldFarming.Env
       Platinum.Contracts.YieldFarming.OnChain
       Platinum.Contracts.YieldFarming.OffChain
