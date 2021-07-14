@@ -23,7 +23,8 @@ maintainer:         Your email
 
 library
     exposed-modules:
-      Platinum.Contracts.YieldFarming.Constants
+      Platinum.Contracts.YieldFarming.Traces.Trace1
+      Platinum.Contracts.YieldFarming.Env
       Platinum.Contracts.YieldFarming.OnChain
       Platinum.Contracts.YieldFarming.OffChain
       Platinum.Contracts.Utils

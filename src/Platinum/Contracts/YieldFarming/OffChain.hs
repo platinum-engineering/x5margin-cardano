@@ -1,9 +1,16 @@
 {-# LANGUAGE TupleSections #-}
 
-module Platinum.Contracts.YieldFarming.OffChain where
+module Platinum.Contracts.YieldFarming.OffChain
+       ( ownerEndpoints
+       , userEndpoints
+       , InitLPParams (..)
+       , AssetClassTransferParams (..)
+       , TransferParams (..)
+       ) where
 
 import           Data.Aeson                   (FromJSON, ToJSON)
 import           Data.Text                    (Text, pack)
+import           Data.Monoid                  (Last (..))
 import           GHC.Generics                 (Generic)
 import           Control.Monad                hiding (fmap)
 import           Schema                       (ToSchema)
@@ -15,19 +22,18 @@ import           Plutus.Contract              as Contract
 import qualified PlutusTx.AssocMap            as AMap
 import           Ledger                       hiding (singleton)
 import           Plutus.V1.Ledger.Value       (assetClassValue)
-import           Playground.TH                (mkSchemaDefinitions)
 import           Prelude                      (Show (..))
 import qualified Plutus.Contracts.Currency     as UC
 
 import           Platinum.Contracts.YieldFarming.OnChain
-import           Platinum.Contracts.YieldFarming.Constants (stringConstants, rewardTokenName)
+import           Platinum.Contracts.YieldFarming.Env (Env (..), threadTokenName, rewardTokenName)
 
-yfClient :: StateMachineClient YieldFarmingDatum YieldFarmingRedeemer
-yfClient =
+yfClient :: Env -> StateMachineClient YieldFarmingDatum YieldFarmingRedeemer
+yfClient env =
     mkStateMachineClient $
     StateMachineInstance
-        (yieldFarmingStateMachine stringConstants)
-        (yieldFarmingInstance stringConstants)
+        (yieldFarmingStateMachine env)
+        (yieldFarmingInstance env)
 
 mapErrorSM :: Contract w s SMContractError a -> Contract w s Text a
 mapErrorSM = mapError $ pack . show
@@ -46,28 +52,34 @@ data InitLPParams = InitLPParams {
 
 initLP
     :: InitLPParams
-    -> Contract w s Text ()
+    -> Contract (Last Env) s Text ()
 initLP InitLPParams{..} = do
     ownerPkh <- pubKeyHash <$> Contract.ownPubKey
 
-    -- Create reward tokens
-    -- Make initial emission of reward token
-    oneShotCur <- mapErrorC $ UC.forgeContract ownerPkh [(rewardTokenName, 1000000000)]
-    let rewardAssetClass = assetClass (UC.currencySymbol oneShotCur) rewardTokenName
-    logInfo $ "Reward tokens minted " ++ show rewardAssetClass
+    -- Initial emission of reward tokens and create NFT thread token
+    let totRewardAmount = 1111111111
+    currencySymbol <- UC.currencySymbol <$>
+                      mapErrorC (UC.forgeContract ownerPkh [(rewardTokenName, totRewardAmount), (threadTokenName, 1)])
+    let rewardAssetClass = assetClass currencySymbol rewardTokenName
+    let threadAssetClass = assetClass currencySymbol threadTokenName
+    logInfo $ "Reward tokens and thread NFT tokens minted " ++ show (rewardAssetClass, threadAssetClass)
 
     -- Create pool
     -- TODO check that no RWRD asset class among ilpAssetClasses
     curSlot <- Contract.currentSlot
+    let env = Env {
+        envOwner = ownerPkh,
+        envRewardToken = rewardAssetClass,
+        envThreadToken = threadAssetClass
+    }
+    tell $ Last $ Just env
     let emptyPool = emptyPoolInfo curSlot
     let yfInitDatum =
            YieldFarmingDatum
            { yfdPools = AMap.fromList $ map (, emptyPool) ilpAssetClasses,
-             yfdUsers = AMap.empty,
-             yfdOwner = ownerPkh,
-             yfdRewardToken = rewardAssetClass
+             yfdUsers = AMap.empty
            }
-    void $ mapErrorSM $ runInitialise yfClient yfInitDatum (UC.forgedValue oneShotCur)
+    void $ mapErrorSM $ runInitialise (yfClient env) yfInitDatum (assetClassValue rewardAssetClass totRewardAmount)
     logInfo $ "Started liquidity pool with constant amount of reward tokens " ++ show yfInitDatum
 
 -------------------------------------------------
@@ -85,47 +97,53 @@ data TransferParams = TransferParams {
 } deriving stock (Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
-deposit :: AssetClassTransferParams -> Contract w s Text ()
-deposit AssetClassTransferParams{..} = do
+deposit :: Env -> AssetClassTransferParams -> Contract w s Text ()
+deposit env AssetClassTransferParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
     curSlot <- Contract.currentSlot
-    void $ mapErrorSM $ runStep yfClient $
+    void $ mapErrorSM $ runStep (yfClient env) $
         MkTransfer pkh (assetClassValue actpAC actpAmount) curSlot
 
-withdraw :: AssetClassTransferParams -> Contract w s Text ()
-withdraw AssetClassTransferParams{..} = do
+withdraw :: Env -> AssetClassTransferParams -> Contract w s Text ()
+withdraw env AssetClassTransferParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
     curSlot <- Contract.currentSlot
-    void $ mapErrorSM $ runStep yfClient $
+    void $ mapErrorSM $ runStep (yfClient env) $
         MkTransfer pkh (assetClassValue actpAC (-actpAmount)) curSlot
 
-transfer :: TransferParams -> Contract w s Text ()
-transfer TransferParams{..} = do
+transfer :: Env -> TransferParams -> Contract w s Text ()
+transfer env TransferParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
     curSlot <- Contract.currentSlot
-    void $ mapErrorSM $ runStep yfClient $
+    void $ mapErrorSM $ runStep (yfClient env) $
         MkTransfer pkh actpAmounts curSlot
 
-type YFEndpoints =
-        Endpoint "init"  InitLPParams
-    .\/ Endpoint "deposit"  AssetClassTransferParams
+type YFOwnerEndpoints =
+        Endpoint "init" InitLPParams
+
+type YFUserEndpoints =
+        Endpoint "deposit"  AssetClassTransferParams
     .\/ Endpoint "withdraw" AssetClassTransferParams
     .\/ Endpoint "transfer" TransferParams
 
-endpoints :: Contract () YFEndpoints Text ()
-endpoints =
-    (init' `select`
-     deposit' `select`
+
+ownerEndpoints :: Contract (Last Env) YFOwnerEndpoints Text ()
+ownerEndpoints = initLP' >> ownerEndpoints
+  where
+    initLP' = handleError logError $ endpoint @"init"  >>= initLP
+
+userEndpoints :: Env -> Contract () YFUserEndpoints Text ()
+userEndpoints env =
+    (deposit' `select`
      withdraw' `select`
      transfer') >>
-    endpoints
+    userEndpoints env
   where
-    init' = endpoint @"init" >>= initLP
-    deposit'   = endpoint @"deposit"   >>= deposit
-    withdraw' = endpoint @"withdraw" >>= withdraw
-    transfer' = endpoint @"transfer" >>= transfer
+    deposit'  = handleError logError $ endpoint @"deposit"  >>= deposit env
+    withdraw' = handleError logError $ endpoint @"withdraw" >>= withdraw env
+    transfer' = handleError logError $ endpoint @"transfer" >>= transfer env
 
-mkSchemaDefinitions ''YFEndpoints
+-- mkSchemaDefinitions ''YFEndpoints
 
 -- myToken :: KnownCurrency
 -- myToken = KnownCurrency (ValidatorHash "f") "Token" (TokenName "T" :| [])
