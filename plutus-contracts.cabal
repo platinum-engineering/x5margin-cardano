@@ -91,8 +91,8 @@ library
             -Wno-unused-packages
 
 
-executable pab-server
-  main-is: yield-farming/pab-server.hs
+executable yf-server
+  main-is: yield-farming/yf-server.hs
   default-language: Haskell2010
   hs-source-dirs:      app
   ghc-options:         -Wall
@@ -102,7 +102,22 @@ executable pab-server
                     , freer-extras
                     , plutus-contract
                     , plutus-ledger
-                    , plutus-ledger-api
+                    , plutus-pab
+                    , plutus-contracts
+                    , text
+                    , uuid
+
+executable yf-client
+  main-is: yield-farming/yf-client.hs
+  default-language: Haskell2010
+  hs-source-dirs:      app
+  ghc-options:         -Wall
+  build-depends:      aeson
+                    , base ^>= 4.14.1.0
+                    , freer-simple
+                    , freer-extras
+                    , plutus-contract
+                    , plutus-ledger
                     , plutus-pab
                     , plutus-contracts
                     , req ^>= 3.9.0

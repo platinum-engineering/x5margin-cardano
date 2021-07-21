@@ -11,7 +11,9 @@
 {-# LANGUAGE TypeFamilies       #-}
 {-# LANGUAGE TypeOperators      #-}
 
-module Main (main) where
+module Main
+    ( main
+    ) where
 
 import           Prelude
 import           Control.Monad                       (forM_, void, when)
@@ -21,21 +23,18 @@ import           Control.Monad.Freer.Error           (Error)
 import           Control.Monad.IO.Class              (MonadIO (..))
 import           Data.Aeson                          (FromJSON, Result (..), fromJSON)
 import           Data.Monoid                         (Last (..))
-import           Data.Text                           (Text, pack)
+import           Data.Text                           (Text)
 
 import qualified Plutus.PAB.Simulator                as Simulator
 import           Plutus.PAB.Simulator                (SimulatorEffectHandlers)
 import           Plutus.PAB.Types                    (PABError (..))
 import qualified Plutus.PAB.Webserver.Server         as PAB.Server
 import           Plutus.PAB.Effects.Contract         (ContractEffect (..))
-import           Plutus.PAB.Effects.Contract.Builtin (Builtin, SomeBuiltin (..),
-                                                      type (.\\), endpointsToSchemas, handleBuiltin, EmptySchema)
+import           Plutus.PAB.Effects.Contract.Builtin (Builtin, SomeBuiltin (..), endpointsToSchemas, handleBuiltin)
 import           Plutus.PAB.Monitoring.PABLogMsg     (PABMultiAgentMsg)
-import           Wallet.Emulator.Types               (Wallet (..), walletPubKey)
+import           Wallet.Emulator.Types               (Wallet (..))
 import           Wallet.Types                        (ContractInstanceId (..))
 import           Plutus.Contract
-import           Plutus.V1.Ledger.Value     (assetClass)
-import           Plutus.V1.Ledger.Ada       (adaSymbol, adaToken)
 
 import qualified Platinum.Contracts.YieldFarming.Env as YF
 import qualified Platinum.Contracts.YieldFarming.OffChain as YF
@@ -53,13 +52,14 @@ main = void $ Simulator.runSimulationWith handlers $ do
     void $ Simulator.waitUntilFinished cidTestSetup
 
     cidOwner <- Simulator.activateContract (Wallet 1) $ Init initLPParams
-    --liftIO $ putStrLn $ "Owner cid: " <> show (unContractInstanceId cidOwner)
+    liftIO $ writeFile "Wowner.cid" $ show $ unContractInstanceId cidOwner
     env <- waitForLast cidOwner
 
     forM_ testWallets $ \w ->
         when (w /= Wallet 1) $ do
             cid <- Simulator.activateContract w $ RunInstance env
             liftIO $ putStrLn $ show w <> " cid: " <> show (unContractInstanceId cid)
+            liftIO $ writeFile ('W' : show (getWallet w) ++ ".cid") $ show $ unContractInstanceId cid
 
     void $ liftIO getLine
     shutdown
@@ -93,8 +93,7 @@ handlers =
 
 testInitialSetup :: Contract (Last YF.InitLPParams) EmptySchema Text ()
 testInitialSetup = do
-    let adaAssetClass = assetClass adaSymbol adaToken
-    tell $ Last $ Just $ YF.InitLPParams [adaAssetClass]
+    tell $ Last $ Just $ YF.InitLPParams [YF.adaAssetClass]
 
 testWallets :: [Wallet]
 testWallets = [Wallet i | i <- [1 .. 4]]

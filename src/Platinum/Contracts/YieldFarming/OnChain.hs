@@ -138,8 +138,8 @@ handleAssetClassTransferNRewardUser Env{..} sender (ac, transfered) rewardPerSha
         -- Constraint for a transaction which transfer user's reward to them.
         -- If user didn't have any tokens before then send nothing.
         if userAmount > 0 then
-            -- (Con.mustPayToPubKey sender outstandingReward, outstandingReward)
-            (mempty, outstandingReward)
+            (Con.mustPayToPubKey sender outstandingReward, outstandingReward)
+            --(mempty, outstandingReward)
         else
             (mempty, mempty)
 

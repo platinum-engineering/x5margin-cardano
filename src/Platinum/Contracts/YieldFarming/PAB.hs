@@ -14,7 +14,8 @@ data YieldFarmingContractPABActions
     -- ^ Emit mock tokens. Distribute them among mock wallets.
     | Init YF.InitLPParams
     | RunInstance YF.Env
-    deriving (Show, Generic, FromJSON, ToJSON)
+    deriving stock (Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
 
 instance Pretty YieldFarmingContractPABActions where
     pretty = viaShow

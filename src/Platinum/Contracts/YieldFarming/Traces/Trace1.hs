@@ -10,12 +10,11 @@ import Data.Functor               (void)
 import Data.Monoid                (Last (..))
 
 import Ledger (pubKeyHash)
-import Plutus.V1.Ledger.Value     (assetClass)
-import Plutus.V1.Ledger.Ada       (adaSymbol, adaToken)
 import Plutus.Trace.Emulator      as Emulator
 import Wallet.Emulator.Wallet
 
 import Platinum.Contracts.YieldFarming.OffChain
+import Platinum.Contracts.YieldFarming.Env
 
 trace1IO :: IO ()
 trace1IO = runEmulatorTraceIO trace
@@ -28,7 +27,6 @@ trace = do
 
     hOwner <- activateContractWallet (Wallet 1) ownerEndpoints
 
-    let adaAssetClass = assetClass adaSymbol adaToken
     callEndpoint @"init" hOwner $
         InitLPParams
         { ilpAssetClasses = [adaAssetClass]

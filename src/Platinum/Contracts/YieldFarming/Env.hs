@@ -1,13 +1,14 @@
 module Platinum.Contracts.YieldFarming.Env where
 
+import           Prelude                (Show (..))
 import           Data.Aeson             (ToJSON, FromJSON)
 import           GHC.Generics           (Generic)
 
-import           Plutus.V1.Ledger.Value (AssetClass, TokenName)
+import           Plutus.V1.Ledger.Value (AssetClass, TokenName, assetClass)
+import           Plutus.V1.Ledger.Ada   (adaSymbol, adaToken)
 import qualified PlutusTx
 import           PlutusTx.Prelude
 import           Ledger                 (PubKeyHash)
-import           Prelude                (Show (..))
 
 -- | How far away requested withdrawal slot might be. In slots
 {-# INLINABLE requestValidityIntervalLength #-}
@@ -25,6 +26,10 @@ rewardTokenName = "LP_RWRD"
 {-# INLINABLE threadTokenName #-}
 threadTokenName :: TokenName
 threadTokenName = "PLATINUM_YIELD_FARM_THREAD_TOKEN"
+
+{-# INLINABLE adaAssetClass #-}
+adaAssetClass :: AssetClass
+adaAssetClass = assetClass adaSymbol adaToken
 
 data Env = Env {
     envThreadToken :: !AssetClass,
