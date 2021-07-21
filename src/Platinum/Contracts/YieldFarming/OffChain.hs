@@ -3,9 +3,12 @@
 module Platinum.Contracts.YieldFarming.OffChain
        ( ownerEndpoints
        , userEndpoints
+       , initLP
        , InitLPParams (..)
        , AssetClassTransferParams (..)
        , TransferParams (..)
+       , YFOwnerEndpoints
+       , YFUserEndpoints
        ) where
 
 import           Data.Aeson                   (FromJSON, ToJSON)
@@ -47,7 +50,7 @@ mapErrorC = mapError $ pack . show
 
 data InitLPParams = InitLPParams {
     ilpAssetClasses :: [AssetClass]
-} deriving stock (Generic)
+} deriving stock (Generic, Show)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 initLP

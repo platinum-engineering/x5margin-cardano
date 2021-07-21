@@ -1,12 +1,13 @@
 module Platinum.Contracts.YieldFarming.Env where
 
-import Data.Aeson             (ToJSON, FromJSON)
-import GHC.Generics           (Generic)
+import           Data.Aeson             (ToJSON, FromJSON)
+import           GHC.Generics           (Generic)
 
-import Plutus.V1.Ledger.Value (AssetClass, TokenName)
+import           Plutus.V1.Ledger.Value (AssetClass, TokenName)
 import qualified PlutusTx
-import PlutusTx.Prelude
-import Ledger                 (PubKeyHash)
+import           PlutusTx.Prelude
+import           Ledger                 (PubKeyHash)
+import           Prelude                (Show (..))
 
 -- | How far away requested withdrawal slot might be. In slots
 {-# INLINABLE requestValidityIntervalLength #-}
@@ -29,7 +30,7 @@ data Env = Env {
     envThreadToken :: !AssetClass,
     envRewardToken :: !AssetClass,
     envOwner       :: !PubKeyHash
-} deriving stock (Generic)
+} deriving stock (Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
 PlutusTx.unstableMakeIsData ''Env
