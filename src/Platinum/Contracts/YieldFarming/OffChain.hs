@@ -11,6 +11,10 @@ module Platinum.Contracts.YieldFarming.OffChain
        , YFUserEndpoints
        ) where
 
+import qualified Prelude as P
+import           Prelude                      (Show (..))
+import           PlutusTx.Prelude
+
 import           Data.Aeson                   (FromJSON, ToJSON)
 import           Data.Text                    (Text, pack)
 import           Data.Monoid                  (Last (..))
@@ -20,12 +24,11 @@ import           Schema                       (ToSchema)
 
 import           Plutus.V1.Ledger.Value       (assetClass)
 import           Plutus.Contract.StateMachine
-import           PlutusTx.Prelude
+
 import           Plutus.Contract              as Contract
 import qualified PlutusTx.AssocMap            as AMap
 import           Ledger                       hiding (singleton)
-import           Plutus.V1.Ledger.Value       (assetClassValue)
-import           Prelude                      (Show (..))
+import           Plutus.V1.Ledger.Value       (assetClassValue, toString, unAssetClass)
 import qualified Plutus.Contracts.Currency     as UC
 
 import           Platinum.Contracts.YieldFarming.OnChain
@@ -100,19 +103,27 @@ data TransferParams = TransferParams {
 } deriving stock (Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
-deposit :: Env -> AssetClassTransferParams -> Contract w s Text ()
+deposit :: Env -> AssetClassTransferParams -> Contract w s Text (PubKeyHash, Integer)
 deposit env AssetClassTransferParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
     curSlot <- Contract.currentSlot
     void $ mapErrorSM $ runStep (yfClient env) $
         MkTransfer pkh (assetClassValue actpAC actpAmount) curSlot
+    let tn = toString $ snd $ unAssetClass actpAC
+    logInfo $
+        show pkh <> " deposited " <> show actpAmount <> " of " <> if P.null tn then "ADA" else tn
+    pure (pkh, actpAmount)
 
-withdraw :: Env -> AssetClassTransferParams -> Contract w s Text ()
+withdraw :: Env -> AssetClassTransferParams -> Contract w s Text (PubKeyHash, Integer)
 withdraw env AssetClassTransferParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
     curSlot <- Contract.currentSlot
     void $ mapErrorSM $ runStep (yfClient env) $
         MkTransfer pkh (assetClassValue actpAC (-actpAmount)) curSlot
+    let tn = toString $ snd $ unAssetClass actpAC
+    logInfo $
+        show pkh <> " withdrew " <> show actpAmount <> " of " <> if P.null tn then "ADA" else tn
+    pure (pkh, actpAmount)
 
 transfer :: Env -> TransferParams -> Contract w s Text ()
 transfer env TransferParams{..} = do
@@ -129,22 +140,31 @@ type YFUserEndpoints =
     .\/ Endpoint "withdraw" AssetClassTransferParams
     .\/ Endpoint "transfer" TransferParams
 
-
 ownerEndpoints :: Contract (Last Env) YFOwnerEndpoints Text ()
 ownerEndpoints = initLP' >> ownerEndpoints
   where
     initLP' = handleError logError $ endpoint @"init"  >>= initLP
 
-userEndpoints :: Env -> Contract () YFUserEndpoints Text ()
+data UserEndpointsReturn
+    = Deposited PubKeyHash Integer
+    | Withdrew PubKeyHash Integer
+    deriving (Show, Generic, FromJSON, ToJSON)
+
+userEndpoints :: Env -> Contract (Last UserEndpointsReturn) YFUserEndpoints Text ()
 userEndpoints env =
-    (deposit' `select`
-     withdraw' `select`
-     transfer') >>
+    (wrapEndp @"deposit"  (P.uncurry Deposited)  deposit `select`
+     wrapEndp @"withdraw" (P.uncurry Withdrew) withdraw) >>
     userEndpoints env
   where
-    deposit'  = handleError logError $ endpoint @"deposit"  >>= deposit env
-    withdraw' = handleError logError $ endpoint @"withdraw" >>= withdraw env
-    transfer' = handleError logError $ endpoint @"transfer" >>= transfer env
+    wrapEndp
+      :: forall l p a . (HasEndpoint l p YFUserEndpoints, FromJSON p)
+      => (a -> UserEndpointsReturn)
+      -> (Env -> p -> Contract (Last UserEndpointsReturn) YFUserEndpoints Text a)
+      -> Contract (Last UserEndpointsReturn) YFUserEndpoints Text ()
+    wrapEndp wrapRet endp = handleError logError $ do
+        p <- endpoint @l
+        res <- endp env p
+        tell $ Last $ Just $ wrapRet res
 
 -- mkSchemaDefinitions ''YFEndpoints
 
