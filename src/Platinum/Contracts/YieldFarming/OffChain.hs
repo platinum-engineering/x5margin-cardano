@@ -9,6 +9,7 @@ module Platinum.Contracts.YieldFarming.OffChain
        , TransferParams (..)
        , YFOwnerEndpoints
        , YFUserEndpoints
+       , UserEndpointsReturn
        ) where
 
 import qualified Prelude as P
@@ -129,9 +130,9 @@ withdraw env AssetClassTransferParams{..} = do
 
 scriptBalance :: Env -> Contract w s Text Value
 scriptBalance env = do
-    let scriptAddress = yieldFarmingAddress env
-    utxo <- utxoAt scriptAddress
-    let res = snd $ head $ Map.toList $ Ledger.values $ Ledger.AddressMap $ Map.singleton scriptAddress utxo
+    let scrAddr = yieldFarmingAddress env
+    utxo <- utxoAt scrAddr
+    let res = snd $ head $ Map.toList $ Ledger.values $ Ledger.AddressMap $ Map.singleton scrAddr utxo
     logInfo $ "Script balance: " <> show res
     pure res
 

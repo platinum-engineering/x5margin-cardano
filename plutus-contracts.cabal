@@ -113,6 +113,7 @@ executable yf-client
   hs-source-dirs:      app
   ghc-options:         -Wall
   build-depends:      aeson
+                    , aeson-pretty
                     , base ^>= 4.14.1.0
                     , bytestring
                     , freer-simple
