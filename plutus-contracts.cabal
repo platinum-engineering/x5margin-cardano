@@ -25,6 +25,7 @@ library
     exposed-modules:
       Platinum.Contracts.YieldFarming.Traces.Trace1
       Platinum.Contracts.YieldFarming.Traces.Trace2
+      Platinum.Contracts.YieldFarming.CLI
       Platinum.Contracts.YieldFarming.Env
       Platinum.Contracts.YieldFarming.OffChain
       Platinum.Contracts.YieldFarming.OnChain
@@ -36,6 +37,7 @@ library
       bytestring,
       containers,
       freer-extras,
+      optparse-applicative,
       playground-common,
       plutus-contract,
       plutus-tx-plugin,
@@ -118,6 +120,7 @@ executable yf-client
                     , bytestring
                     , freer-simple
                     , freer-extras
+                    , optparse-applicative
                     , plutus-contract
                     , plutus-ledger
                     , plutus-ledger-api
