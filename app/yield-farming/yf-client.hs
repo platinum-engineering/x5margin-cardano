@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main
     ( main
@@ -9,19 +10,21 @@ module Main
 
 import Control.Concurrent
 import Control.Exception
-import Control.Monad.IO.Class                  (MonadIO (..))
-import Data.Aeson                              (Result (..), fromJSON)
-import Data.Monoid                             (Last (..))
-import Data.Proxy                              (Proxy (..))
-import Data.Text                               (pack)
-import Data.UUID
+import Control.Monad.IO.Class      (MonadIO (..))
+import Data.Proxy                  (Proxy (..))
+import Data.Text                   (pack)
+import Data.UUID            hiding (toString, fromString)
+import Data.Aeson (encode)
 import Network.HTTP.Req
-import Plutus.PAB.Webserver.Types
-import System.Environment                      (getArgs)
+import System.Environment          (getArgs)
 import System.IO
-import Text.Read                               (readMaybe)
+import Text.Read                   (readMaybe)
+import Data.List
+import qualified Data.Char       as Char
+import qualified Data.ByteString.Lazy.Char8 as B
 
-import           Platinum.Contracts.YieldFarming.PAB
+import Plutus.V1.Ledger.Value (Value, flattenValue, toString)
+
 import qualified Platinum.Contracts.YieldFarming.Env as YF
 import qualified Platinum.Contracts.YieldFarming.OffChain as YF
 
@@ -39,30 +42,35 @@ main = do
         case cmd of
             Deposit amt  -> deposit uuid amt
             Withdraw amt -> withdraw uuid amt
+            Funds walId -> walletFunds uuid walId
         go uuid
 
     readCommand :: IO Command
     readCommand = do
-        putStr "Enter command (Deposit amt, Withdraw amt): "
+        putStr "Enter command (deposit amt, withdraw amt, funds walletId): "
         s <- getLine
-        maybe (putStrLn "Couldn't parse command" >> readCommand) return $ readMaybe s
+        maybe (putStrLn "Couldn't parse command" >> readCommand) return $ readMaybe (capitalized s)
 
+-- Wallet API https://github.com/input-output-hk/plutus/blob/master/plutus-pab/src/Cardano/Wallet/API.hs
 data Command
     = Deposit Integer
     | Withdraw Integer
+    | Funds Integer
     deriving (Show, Read, Eq, Ord)
 
 deposit :: UUID -> Integer -> IO ()
 deposit uuid amt = handle h $ runReq defaultHttpConfig $ do
     let lov = amt * 1_000_000
+    liftIO $ putStrLn $ B.unpack $ encode $ YF.AssetClassTransferParams YF.adaAssetClass lov
     v <- req
         POST
         (http "127.0.0.1" /: "api"  /: "new" /: "contract" /: "instance" /: pack (show uuid) /: "endpoint" /: "deposit")
         (ReqBodyJson $ YF.AssetClassTransferParams YF.adaAssetClass lov)
         (Proxy :: Proxy (JsonResponse ()))
         (port 8080)
+
     liftIO $ putStrLn $ if responseStatusCode v == 200
-        then "Deposited " ++ show lov ++ " lovelace"
+        then "Request to deposit " ++ show amt ++ " ADA sent"
         else "After deposit request failure http code returned: " <> show (responseStatusCode v)
   where
     h :: HttpException -> IO ()
@@ -80,10 +88,35 @@ withdraw uuid amt = handle h $ runReq defaultHttpConfig $ do
         (Proxy :: Proxy (JsonResponse ()))
         (port 8080)
     liftIO $ putStrLn $ if responseStatusCode v == 200
-        then "Withdrew " ++ show lov ++ " lovelace"
+        then "Request to withdraw " ++ show amt ++ " ADA sent"
         else "After withdraw request failure http code returned: " <> show (responseStatusCode v)
   where
     h :: HttpException -> IO ()
     h e = do
         putStrLn $ show e <> " happened in withdraw"
         threadDelay 1_000_000 >> withdraw uuid amt
+
+walletFunds :: UUID -> Integer -> IO ()
+walletFunds uuid walletId = handle h $ runReq defaultHttpConfig $ do
+    v <- req
+        GET
+        (http "127.0.0.1" /: "wallet"  /: pack (show walletId) /: "total-funds")
+        NoReqBody
+        (Proxy :: Proxy (JsonResponse Value))
+        (port 8080)
+    let prettyValue =
+            intercalate ", " .
+            map (\(_, t, am) -> (if t == "" then "ADA" else toString t) ++ ": " ++ show am) .
+            flattenValue
+    liftIO $ putStrLn $ if responseStatusCode v == 200
+        then "Wallet " ++ show walletId ++ " funds: " ++ prettyValue (responseBody v)
+        else "After wallet funds request failure http code returned: " <> show (responseStatusCode v)
+  where
+    h :: HttpException -> IO ()
+    h e = do
+        putStrLn $ show e <> " happened in wallet funds"
+        threadDelay 1_000_000 >> walletFunds uuid walletId
+
+capitalized :: String -> String
+capitalized (h : t) = Char.toUpper h : map Char.toLower t
+capitalized [] = []

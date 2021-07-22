@@ -114,10 +114,12 @@ executable yf-client
   ghc-options:         -Wall
   build-depends:      aeson
                     , base ^>= 4.14.1.0
+                    , bytestring
                     , freer-simple
                     , freer-extras
                     , plutus-contract
                     , plutus-ledger
+                    , plutus-ledger-api
                     , plutus-pab
                     , plutus-contracts
                     , req ^>= 3.9.0
