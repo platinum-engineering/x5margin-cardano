@@ -15,6 +15,7 @@ import qualified Prelude as P
 import           Prelude                      (Show (..))
 import           PlutusTx.Prelude
 
+import qualified Data.Map                     as Map
 import           Data.Aeson                   (FromJSON, ToJSON)
 import           Data.Text                    (Text, pack)
 import           Data.Monoid                  (Last (..))
@@ -28,6 +29,7 @@ import           Plutus.Contract.StateMachine
 import           Plutus.Contract              as Contract
 import qualified PlutusTx.AssocMap            as AMap
 import           Ledger                       hiding (singleton)
+import qualified Ledger.AddressMap            as Ledger
 import           Plutus.V1.Ledger.Value       (assetClassValue, toString, unAssetClass)
 import qualified Plutus.Contracts.Currency     as UC
 
@@ -89,7 +91,7 @@ initLP InitLPParams{..} = do
     logInfo $ "Started liquidity pool with constant amount of reward tokens " ++ show yfInitDatum
 
 -------------------------------------------------
--- On-chain endpoints
+-- Off-chain endpoints
 -------------------------------------------------
 
 data AssetClassTransferParams = AssetClassTransferParams {
@@ -125,6 +127,14 @@ withdraw env AssetClassTransferParams{..} = do
         show pkh <> " withdrew " <> show actpAmount <> " of " <> if P.null tn then "ADA" else tn
     pure (pkh, actpAmount)
 
+scriptBalance :: Env -> Contract w s Text Value
+scriptBalance env = do
+    let scriptAddress = yieldFarmingAddress env
+    utxo <- utxoAt scriptAddress
+    let res = snd $ head $ Map.toList $ Ledger.values $ Ledger.AddressMap $ Map.singleton scriptAddress utxo
+    logInfo $ "Script balance: " <> show res
+    pure res
+
 transfer :: Env -> TransferParams -> Contract w s Text ()
 transfer env TransferParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
@@ -132,13 +142,18 @@ transfer env TransferParams{..} = do
     void $ mapErrorSM $ runStep (yfClient env) $
         MkTransfer pkh actpAmounts curSlot
 
+-------------------------------------------------
+-- Off-chain machinery
+-------------------------------------------------
+
 type YFOwnerEndpoints =
         Endpoint "init" InitLPParams
 
 type YFUserEndpoints =
         Endpoint "deposit"  AssetClassTransferParams
     .\/ Endpoint "withdraw" AssetClassTransferParams
-    .\/ Endpoint "transfer" TransferParams
+    .\/ Endpoint "scriptBalance" ()
+    -- .\/ Endpoint "transfer" TransferParams
 
 ownerEndpoints :: Contract (Last Env) YFOwnerEndpoints Text ()
 ownerEndpoints = initLP' >> ownerEndpoints
@@ -148,12 +163,15 @@ ownerEndpoints = initLP' >> ownerEndpoints
 data UserEndpointsReturn
     = Deposited PubKeyHash Integer
     | Withdrew PubKeyHash Integer
+    | ScriptBalance Value
     deriving (Show, Generic, FromJSON, ToJSON)
 
 userEndpoints :: Env -> Contract (Last UserEndpointsReturn) YFUserEndpoints Text ()
 userEndpoints env =
     (wrapEndp @"deposit"  (P.uncurry Deposited)  deposit `select`
-     wrapEndp @"withdraw" (P.uncurry Withdrew) withdraw) >>
+     wrapEndp @"withdraw" (P.uncurry Withdrew)   withdraw  `select`
+     wrapEndp @"scriptBalance" ScriptBalance     (const . scriptBalance)
+    ) >>
     userEndpoints env
   where
     wrapEndp

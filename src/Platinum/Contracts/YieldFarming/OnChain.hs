@@ -6,6 +6,7 @@ import           Ledger                         (PubKeyHash, ScriptContext (..),
 import           Ledger.TimeSlot                (posixTimeRangeToSlotRange)
 import           Plutus.V1.Ledger.Value         (Value, AssetClass, TokenName, CurrencySymbol, assetClass,
                                                  assetClassValue, flattenValue, assetClassValueOf)
+import           Plutus.V1.Ledger.Address       (Address, scriptAddress)
 import qualified Ledger.Constraints             as Con
 import qualified Ledger.Typed.Scripts           as Scripts
 import           Plutus.Contract.Schema         ()
@@ -184,6 +185,8 @@ yieldFarmingInstance sconsts = Scripts.mkTypedValidator @YFS
 yieldFarmingValidator :: Env -> Validator
 yieldFarmingValidator = Scripts.validatorScript . yieldFarmingInstance
 
+yieldFarmingAddress :: Env -> Address
+yieldFarmingAddress = scriptAddress . yieldFarmingValidator
 
 ----------------------------------------------------------------
 --- TYPES
