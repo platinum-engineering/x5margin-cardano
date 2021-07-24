@@ -32,6 +32,7 @@ import           Plutus.Contract              as Contract
 import qualified PlutusTx.AssocMap            as AMap
 import           Ledger                       hiding (singleton)
 import qualified Ledger.AddressMap            as Ledger
+import           Ledger.Typed.Tx              (tyTxOutData)
 import           Plutus.V1.Ledger.Value       (assetClassValue, toString, unAssetClass)
 import qualified Plutus.Contracts.Currency     as UC
 
@@ -147,6 +148,20 @@ harvest env HarvestParams{..} = do
         show pkh <> " harvested rewards from " <> if P.null tn then "ADA" else tn <> " pool"
     pure pkh
 
+getUserStakes :: Env -> PubKeyHash -> Contract w s Text Value
+getUserStakes env pkh = do
+    m <- mapErrorSM $ getOnChainState (yfClient env)
+    case m of
+        Nothing          -> do
+            logError @P.String "No running contract found"
+            pure mempty
+        Just ((o, _), _) -> do
+            let users = yfdUsers (tyTxOutData o)
+            let res = maybe mempty uiAmounts $ AMap.lookup pkh users
+            logInfo $
+                show pkh <> " stakes: " <> show res
+            pure res
+
 scriptBalance :: Env -> Contract w s Text Value
 scriptBalance env = do
     let scrAddr = yieldFarmingAddress env
@@ -173,6 +188,7 @@ type YFUserEndpoints =
         Endpoint "deposit"  AssetClassTransferParams
     .\/ Endpoint "withdraw" AssetClassTransferParams
     .\/ Endpoint "harvest" HarvestParams
+    .\/ Endpoint "userStakes" PubKeyHash
     .\/ Endpoint "scriptBalance" ()
     -- .\/ Endpoint "transfer" TransferParams
 
@@ -186,6 +202,7 @@ data UserEndpointsReturn
     | Withdrew PubKeyHash Integer
     | ScriptBalance Value
     | Harvested PubKeyHash
+    | UserStakes Value
     deriving stock (Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
@@ -194,6 +211,7 @@ userEndpoints env =
     (wrapEndp @"deposit"  (P.uncurry Deposited)  deposit `select`
      wrapEndp @"withdraw" (P.uncurry Withdrew)   withdraw  `select`
      wrapEndp @"harvest"  Harvested              harvest `select`
+     wrapEndp @"userStakes"  UserStakes          getUserStakes `select`
      wrapEndp @"scriptBalance" ScriptBalance     (const . scriptBalance)
     ) >>
     userEndpoints env

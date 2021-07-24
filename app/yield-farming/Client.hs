@@ -13,6 +13,7 @@ module Client
      , contractBalance
      , walletBalance
      , harvest
+     , userStakes
      , Command (..)
      , YfClientEnv (..)
      ) where
@@ -31,8 +32,9 @@ import           Data.List
 import qualified Data.ByteString.Lazy.Char8 as B
 import           Data.Aeson.Encode.Pretty (encodePretty)
 import           Plutus.PAB.Webserver.Types (ContractInstanceClientState (..))
-import           Plutus.V1.Ledger.Value     (Value, flattenValue, toString)
+import           Plutus.V1.Ledger.Value     (flattenValue, toString)
 import           Plutus.PAB.Events.ContractInstanceState (PartiallyDecodedResponse (..))
+import           Ledger
 
 import qualified Platinum.Contracts.YieldFarming.Env as YF
 import qualified Platinum.Contracts.YieldFarming.OffChain as YF
@@ -41,9 +43,10 @@ import qualified Platinum.Contracts.YieldFarming.OffChain as YF
 data Command
     = Deposit Integer
     | Withdraw Integer
-    | Balance Integer
+    | Balance Int
     | ContractBalance
     | Harvest
+    | UserStakes Int
     deriving (Show, Read, Eq, Ord)
 
 data YfClientEnv = YfClientEnv {
@@ -90,6 +93,16 @@ harvest = do
         (Proxy :: Proxy (JsonResponse ()))
         (port p)
 
+userStakes :: PubKeyHash -> RIO ()
+userStakes pkh = do
+    uuid <- asks ceUUID
+    endpoint "userStakes" (const $ pure True) $ \host p -> req
+        POST
+        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "userStakes")
+        (ReqBodyJson pkh)
+        (Proxy :: Proxy (JsonResponse ()))
+        (port p)
+
 contractBalance :: RIO ()
 contractBalance = do
     uuid <- asks ceUUID
@@ -100,7 +113,7 @@ contractBalance = do
         (Proxy :: Proxy (JsonResponse ()))
         (port p)
 
-walletBalance :: Integer -> RIO ()
+walletBalance :: Int -> RIO ()
 walletBalance walletId = do
     let prettyValue =
             intercalate ", " .

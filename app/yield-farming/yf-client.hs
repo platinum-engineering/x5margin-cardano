@@ -19,8 +19,10 @@ import qualified Data.Char                  as Char
 import           Options.Applicative (execParser)
 import           System.Exit (die)
 
-import ClientCLI
-import Client
+import           Wallet.Emulator.Wallet  (walletPubKey, Wallet (..))
+import           Plutus.V1.Ledger.Crypto (pubKeyHash)
+import           ClientCLI
+import           Client
 
 main :: IO ()
 main = do
@@ -44,11 +46,13 @@ main = do
             Balance walId  -> walletBalance walId
             ContractBalance -> contractBalance
             Harvest -> harvest
+            UserStakes walId ->
+                userStakes $ pubKeyHash $ walletPubKey $ Wallet $ fromIntegral walId
         go params uuid
 
     readCommand :: IO Command
     readCommand = do
-        putStr "Enter command (deposit amt, withdraw amt, balance walletId, contractBalance, harvest): "
+        putStr "Enter command (deposit amt, withdraw amt, balance walletId, contractBalance, harvest, userStakes): "
         s <- getLine
         maybe (putStrLn "Couldn't parse command" >> readCommand) return $ readMaybe (capitalized s)
 
