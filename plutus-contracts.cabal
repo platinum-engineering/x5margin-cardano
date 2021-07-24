@@ -131,4 +131,5 @@ executable yf-client
                     , plutus-contracts
                     , req ^>= 3.9.0
                     , text
+                    , transformers
                     , uuid

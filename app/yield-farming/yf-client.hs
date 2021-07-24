@@ -11,6 +11,7 @@ module Main
     ( main
     ) where
 
+import           Control.Monad.Trans.Reader (runReaderT)
 import           Data.UUID    hiding        (toString, fromString)
 import           System.IO
 import           Text.Read                  (readMaybe)
@@ -37,12 +38,12 @@ main = do
     go :: ClientCLI -> UUID -> IO a
     go params@ClientCLI{..} uuid = do
         cmd <- readCommand
-        case cmd of
-            Deposit amt  -> deposit ccliHost ccliPort uuid amt
-            Withdraw amt -> withdraw ccliHost ccliPort uuid amt
-            Balance walId  -> walletBalance ccliHost ccliPort  uuid walId
-            ContractBalance -> contractBalance ccliHost ccliPort uuid
-            Harvest -> harvest ccliHost ccliPort uuid
+        flip runReaderT (YfClientEnv ccliHost ccliPort uuid) $ case cmd of
+            Deposit amt  -> deposit amt
+            Withdraw amt -> withdraw amt
+            Balance walId  -> walletBalance walId
+            ContractBalance -> contractBalance
+            Harvest -> harvest
         go params uuid
 
     readCommand :: IO Command

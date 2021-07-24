@@ -14,11 +14,14 @@ module Client
      , walletBalance
      , harvest
      , Command (..)
+     , YfClientEnv (..)
      ) where
 
+import           Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
 import           Control.Concurrent
-import           Control.Exception
+import           Control.Exception          (handle)
 import           Control.Monad.IO.Class     (MonadIO (..))
+import           Control.Monad              (when)
 import           Data.Proxy                 (Proxy (..))
 import           Data.Text                  (pack)
 import           Data.UUID    hiding        (toString, fromString)
@@ -43,147 +46,133 @@ data Command
     | Harvest
     deriving (Show, Read, Eq, Ord)
 
+data YfClientEnv = YfClientEnv {
+    ceHost :: String,
+    cePort :: Int,
+    ceUUID :: UUID
+} deriving (Eq, Show)
+
+type RIO = ReaderT YfClientEnv IO
+
 baseUrlInstance :: String -> Url 'Http
 baseUrlInstance host = http (pack host) /: "api"  /: "new" /: "contract" /: "instance"
 
 baseUrlWallet :: String -> Url 'Http
 baseUrlWallet host = http (pack host) /: "wallet"
 
-deposit :: String -> Int -> UUID -> Integer -> IO ()
-deposit host p uuid amt = handle h $ runReq defaultHttpConfig $ do
-    let lov = amt * 1_000_000
-    -- liftIO $ putStrLn $ B.unpack $ encode $ YF.AssetClassTransferParams YF.adaAssetClass lov
-    initSt <- liftIO $ getStatus host p uuid
-    v <- req
-            POST
-            (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "deposit")
-            (ReqBodyJson $ YF.AssetClassTransferParams YF.adaAssetClass lov)
-            (Proxy :: Proxy (JsonResponse ()))
-            (port p)
+deposit :: Integer -> RIO ()
+deposit amt = do
+    uuid <- asks ceUUID
+    endpoint "deposit" (const $ pure True) $ \host p -> req
+        POST
+        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "deposit")
+        (ReqBodyJson $ YF.AssetClassTransferParams YF.adaAssetClass $ amt * 1_000_000)
+        (Proxy :: Proxy (JsonResponse ()))
+        (port p)
 
-    liftIO $ if responseStatusCode v == 200 then do
-        putStrLn $ "Request to deposit " ++ show amt ++ " ADA sent. Waiting for result"
-        printResult host p uuid initSt
-    else
-        putStrLn $ "After deposit request failure http code returned: " <> show (responseStatusCode v)
-  where
-    h :: HttpException -> IO ()
-    h e = do
-        putStrLn $ show e <> " happened in deposit"
-        threadDelay 1_000_000 >> deposit host p uuid amt
+withdraw :: Integer -> RIO ()
+withdraw amt = do
+    uuid <- asks ceUUID
+    endpoint "withdraw" (const $ pure True) $ \host p -> req
+        POST
+        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "withdraw")
+        (ReqBodyJson $ YF.AssetClassTransferParams YF.adaAssetClass $ amt * 1_000_000)
+        (Proxy :: Proxy (JsonResponse ()))
+        (port p)
 
-withdraw :: String -> Int -> UUID -> Integer -> IO ()
-withdraw host p uuid amt = handle h $ runReq defaultHttpConfig $ do
-    let lov = amt * 1_000_000
-    initSt <- liftIO $ getStatus host p uuid
-    v <- req
-            POST
-            (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "withdraw")
-            (ReqBodyJson $ YF.AssetClassTransferParams YF.adaAssetClass lov)
-            (Proxy :: Proxy (JsonResponse ()))
-            (port p)
-    liftIO $ if responseStatusCode v == 200 then do
-        putStrLn $ "Request to withdraw " ++ show amt ++ " ADA sent. Waiting for result"
-        printResult host p uuid initSt
-    else
-        putStrLn $ "After withdraw request failure http code returned: " <> show (responseStatusCode v)
-  where
-    h :: HttpException -> IO ()
-    h e = do
-        putStrLn $ show e <> " happened in withdraw"
-        threadDelay 1_000_000 >> withdraw host p uuid amt
+harvest :: RIO ()
+harvest = do
+    uuid <- asks ceUUID
+    endpoint "harvest" (const $ pure True) $ \host p -> req
+        POST
+        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "harvest")
+        (ReqBodyJson $ YF.HarvestParams YF.adaAssetClass)
+        (Proxy :: Proxy (JsonResponse ()))
+        (port p)
 
-harvest :: String -> Int -> UUID -> IO ()
-harvest host p uuid = handle h $ runReq defaultHttpConfig $ do
-    initSt <- liftIO $ getStatus host p uuid
-    v <- req
-            POST
-            (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "harvest")
-            (ReqBodyJson $ YF.HarvestParams YF.adaAssetClass)
-            (Proxy :: Proxy (JsonResponse ()))
-            (port p)
-    liftIO $ if responseStatusCode v == 200 then do
-        putStrLn $ "Request to harvest from ADA pool. Waiting for result"
-        printResult host p uuid initSt
-    else
-        putStrLn $ "After harvedt request failure http code returned: " <> show (responseStatusCode v)
-  where
-    h :: HttpException -> IO ()
-    h e = do
-        putStrLn $ show e <> " happened in harvest"
-        threadDelay 1_000_000 >> harvest host p uuid
+contractBalance :: RIO ()
+contractBalance = do
+    uuid <- asks ceUUID
+    endpoint "contractBalance" (const $ pure True) $ \host p -> req
+        POST
+        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "scriptBalance")
+        (ReqBodyJson ())
+        (Proxy :: Proxy (JsonResponse ()))
+        (port p)
 
-contractBalance :: String -> Int -> UUID -> IO ()
-contractBalance host p uuid = handle h $ runReq defaultHttpConfig $ do
-    initSt <- liftIO $ getStatus host p uuid
-    v <- req
-            POST
-            (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "scriptBalance")
-            (ReqBodyJson ())
-            (Proxy :: Proxy (JsonResponse ()))
-            (port p)
-
-    liftIO $ if responseStatusCode v == 200 then do
-        putStrLn $ "Contract balance requested. Waiting for result"
-        printResult host p uuid initSt
-    else
-        putStrLn $ "After deposit request failure http code returned: " <> show (responseStatusCode v)
-  where
-    h :: HttpException -> IO ()
-    h e = do
-        putStrLn $ show e <> " happened in contract balance"
-        threadDelay 1_000_000 >> contractBalance host p uuid
-
-walletBalance :: String -> Int -> UUID -> Integer -> IO ()
-walletBalance host p uuid walletId = handle h $ runReq defaultHttpConfig $ do
-    v <- req
-            GET
-            (baseUrlWallet host /: pack (show walletId) /: "total-funds")
-            NoReqBody
-            (Proxy :: Proxy (JsonResponse Value))
-            (port p)
+walletBalance :: Integer -> RIO ()
+walletBalance walletId = do
     let prettyValue =
             intercalate ", " .
             map (\(_, t, am) -> (if t == "" then "ADA" else toString t) ++ ": " ++ show am) .
             flattenValue
-    liftIO $ putStrLn $ if responseStatusCode v == 200
-        then "Wallet " ++ show walletId ++ " funds: " ++ prettyValue (responseBody v)
-        else "After wallet funds request failure http code returned: " <> show (responseStatusCode v)
+    endpoint
+        "balance"
+        (\v -> False <$ liftIO (putStrLn $ "Wallet " ++ show walletId ++ " balance: " ++ prettyValue v)) $ \host p ->
+            req
+                GET
+                (baseUrlWallet host /: pack (show walletId) /: "total-funds")
+                NoReqBody
+                (Proxy :: Proxy (JsonResponse Value))
+                (port p)
+
+endpoint
+    :: HttpResponse resp
+    => String
+    -> (HttpResponseBody resp -> RIO Bool)
+    -> (String -> Int -> Req resp)
+    -> RIO ()
+endpoint method afterReq reqAct = do
+    env@YfClientEnv{..} <- ask
+    let run a = runReaderT a env
+    handleHttpEx method $ runReq defaultHttpConfig $ do
+        initSt <- liftIO $ run $ getStatus ceUUID
+        v <- reqAct ceHost cePort
+        liftIO $ if responseStatusCode v == 200 then do
+            putStrLn $ method <> " requested. Waiting for result"
+            wait <- run $ afterReq (responseBody v)
+            when wait $ run $ printResult ceUUID initSt
+        else
+            putStrLn $ "After " <> method <> " request failure http code returned: " <> show (responseStatusCode v)
+
+handleHttpEx :: forall x . String -> IO x -> RIO x
+handleHttpEx method act = liftIO $ handle h act
   where
-    h :: HttpException -> IO ()
+    h :: HttpException -> IO x
     h e = do
-        putStrLn $ show e <> " happened in walletBalance"
-        threadDelay 1_000_000 >> walletBalance host p uuid walletId
+        putStrLn $ show e <> " happened in " <> method
+        threadDelay 1_000_000 >> act
 
 type Status = ContractInstanceClientState A.Value
 
-getStatus :: String -> Int -> UUID -> IO Status
-getStatus host p uuid = runReq defaultHttpConfig $ do
-    v <-
-        req
-            GET
-            (baseUrlInstance host /: pack (show uuid) /: "status")
-            NoReqBody
-            (Proxy :: Proxy (JsonResponse Status))
-            (port p)
-    pure $ responseBody v
+getStatus :: UUID -> RIO Status
+getStatus uuid = do
+    YfClientEnv{..} <- ask
+    runReq defaultHttpConfig $ do
+        v <- req
+                GET
+                (baseUrlInstance ceHost /: pack (show uuid) /: "status")
+                NoReqBody
+                (Proxy :: Proxy (JsonResponse Status))
+                (port cePort)
+        pure $ responseBody v
 
-waitForResult :: String -> Int -> UUID -> Status -> IO Status
-waitForResult host p uuid initSt' = do
+waitForResult :: UUID -> Status -> RIO Status
+waitForResult uuid initSt' = do
     let initSt = cicCurrentState initSt'
-    cur' <- getStatus host p uuid
+    cur' <- getStatus uuid
     let cur = cicCurrentState cur'
 
     if (logs cur == logs initSt
         && err cur == err initSt
         && observableState cur == observableState initSt) then do
-        threadDelay 1_000_000
-        waitForResult host p uuid initSt'
+        liftIO $ threadDelay 1_000_000
+        waitForResult uuid initSt'
     else
         pure cur'
 
-printResult :: String -> Int -> UUID -> Status -> IO ()
-printResult host p uuid initSt = do
-    result <- waitForResult host p uuid initSt
-    putStrLn "Result: "
-    putStrLn $ B.unpack $ encodePretty $ observableState . cicCurrentState $ result
+printResult :: UUID -> Status -> RIO ()
+printResult uuid initSt = do
+    result <- waitForResult uuid initSt
+    liftIO $ putStrLn "Result: "
+    liftIO $ putStrLn $ B.unpack $ encodePretty $ observableState . cicCurrentState $ result
