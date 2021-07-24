@@ -6,6 +6,7 @@ module Platinum.Contracts.YieldFarming.OffChain
        , initLP
        , InitLPParams (..)
        , AssetClassTransferParams (..)
+       , HarvestParams (..)
        , TransferParams (..)
        , YFOwnerEndpoints
        , YFUserEndpoints
@@ -102,7 +103,7 @@ data AssetClassTransferParams = AssetClassTransferParams {
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 data HarvestParams = HarvestParams {
-    hpAC     :: !AssetClass
+    hpTokenNameOfPool :: !AssetClass
 } deriving stock (Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
@@ -136,9 +137,12 @@ withdraw env AssetClassTransferParams{..} = do
 harvest :: Env -> HarvestParams -> Contract w s Text PubKeyHash
 harvest env HarvestParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
+    -- let tokenName = fromString $ if hpTokenNameOfPool == "ADA" then "" else hpTokenNameOfPool
+    -- m <- mapErrorSM $ getOnChainState client
     curSlot <- Contract.currentSlot
-    void $ mapErrorSM $ runStep (yfClient env) $ Harvest pkh curSlot hpAC
-    let tn = toString $ snd $ unAssetClass hpAC
+    void $ mapErrorSM $ runStep (yfClient env) $
+        Harvest pkh curSlot hpTokenNameOfPool
+    let tn = toString $ snd $ unAssetClass hpTokenNameOfPool
     logInfo $
         show pkh <> " harvested rewards from " <> if P.null tn then "ADA" else tn <> " pool"
     pure pkh
@@ -189,7 +193,7 @@ userEndpoints :: Env -> Contract (Last UserEndpointsReturn) YFUserEndpoints Text
 userEndpoints env =
     (wrapEndp @"deposit"  (P.uncurry Deposited)  deposit `select`
      wrapEndp @"withdraw" (P.uncurry Withdrew)   withdraw  `select`
-     wrapEndp @"harvest" Harvested               harvest `select`
+     wrapEndp @"harvest"  Harvested              harvest `select`
      wrapEndp @"scriptBalance" ScriptBalance     (const . scriptBalance)
     ) >>
     userEndpoints env

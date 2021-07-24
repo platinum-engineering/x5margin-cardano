@@ -1,4 +1,6 @@
-module Platinum.Contracts.YieldFarming.CLI where
+{-# LANGUAGE DerivingStrategies #-}
+
+module ClientCLI where
 
 import Prelude
 import Options.Applicative
