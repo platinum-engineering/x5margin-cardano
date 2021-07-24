@@ -54,7 +54,7 @@ main = do
 
     readCommand :: IO Command
     readCommand = do
-        putStr "Enter command (deposit amt, withdraw amt, balance walletId, contractBalance, pendingReward, harvest userStakes): "
+        putStr "Enter command (deposit amt, withdraw amt, balance walletId, contractBalance, pendingReward walletId, harvest, userStakes walletId): "
         s <- getLine
         maybe (putStrLn "Couldn't parse command" >> readCommand) return $ readMaybe (capitalized s)
 
