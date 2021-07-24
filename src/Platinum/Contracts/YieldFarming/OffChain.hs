@@ -6,6 +6,7 @@ module Platinum.Contracts.YieldFarming.OffChain
        , initLP
        , InitLPParams (..)
        , AssetClassTransferParams (..)
+       , PendingRewardParams (..)
        , HarvestParams (..)
        , TransferParams (..)
        , YFOwnerEndpoints
@@ -32,8 +33,8 @@ import           Plutus.Contract              as Contract
 import qualified PlutusTx.AssocMap            as AMap
 import           Ledger                       hiding (singleton)
 import qualified Ledger.AddressMap            as Ledger
-import           Ledger.Typed.Tx              (tyTxOutData)
-import           Plutus.V1.Ledger.Value       (assetClassValue, toString, unAssetClass)
+import           Ledger.Typed.Tx              (tyTxOutData, tyTxOutTxOut)
+import           Plutus.V1.Ledger.Value       (assetClassValue, assetClassValueOf, toString, unAssetClass)
 import qualified Plutus.Contracts.Currency     as UC
 
 import           Platinum.Contracts.YieldFarming.OnChain
@@ -108,6 +109,12 @@ data HarvestParams = HarvestParams {
 } deriving stock (Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
+data PendingRewardParams = PendingRewardParams {
+    prpPkh             :: PubKeyHash,
+    prpTokenNameOfPool :: !AssetClass
+} deriving stock (Generic)
+  deriving anyclass (FromJSON, ToJSON, ToSchema)
+
 data TransferParams = TransferParams {
     actpAmounts :: !Value
 } deriving stock (Generic)
@@ -148,6 +155,29 @@ harvest env HarvestParams{..} = do
         show pkh <> " harvested rewards from " <> if P.null tn then "ADA" else tn <> " pool"
     pure pkh
 
+pendingReward :: Env -> PendingRewardParams -> Contract w s Text Value
+pendingReward env PendingRewardParams{..} = do
+    let ac = prpTokenNameOfPool
+    let tn = toString $ snd $ unAssetClass ac
+    curSlot <- Contract.currentSlot
+    m <- mapErrorSM $ getOnChainState (yfClient env)
+    case m of
+        Nothing          -> do
+            logError @P.String "No running contract found"
+            pure mempty
+        Just ((o, _), _) -> do
+            let datum = tyTxOutData o
+            let poolFunds = txOutValue $ tyTxOutTxOut o
+            let totalSupplyInPool = assetClassValueOf poolFunds ac
+            case transferNRewardUser env prpPkh (ac, 0) curSlot (datum, totalSupplyInPool) of
+                Nothing -> do
+                    logInfo @P.String "Couldn't compute pending reward"
+                    pure mempty
+                Just (_, reward, _) -> do
+                    logInfo $
+                        show prpPkh <> " pending reward in " <> if P.null tn then "ADA" else tn <> ": " <> show reward
+                    pure reward
+
 getUserStakes :: Env -> PubKeyHash -> Contract w s Text Value
 getUserStakes env pkh = do
     m <- mapErrorSM $ getOnChainState (yfClient env)
@@ -187,6 +217,7 @@ type YFOwnerEndpoints =
 type YFUserEndpoints =
         Endpoint "deposit"  AssetClassTransferParams
     .\/ Endpoint "withdraw" AssetClassTransferParams
+    .\/ Endpoint "pendingReward" PendingRewardParams
     .\/ Endpoint "harvest" HarvestParams
     .\/ Endpoint "userStakes" PubKeyHash
     .\/ Endpoint "scriptBalance" ()
@@ -201,6 +232,7 @@ data UserEndpointsReturn
     = Deposited PubKeyHash Integer
     | Withdrew PubKeyHash Integer
     | ScriptBalance Value
+    | PendingReward Value
     | Harvested PubKeyHash
     | UserStakes Value
     deriving stock (Show, Generic)
@@ -210,6 +242,7 @@ userEndpoints :: Env -> Contract (Last UserEndpointsReturn) YFUserEndpoints Text
 userEndpoints env =
     (wrapEndp @"deposit"  (P.uncurry Deposited)  deposit `select`
      wrapEndp @"withdraw" (P.uncurry Withdrew)   withdraw  `select`
+     wrapEndp @"pendingReward"  PendingReward    pendingReward `select`
      wrapEndp @"harvest"  Harvested              harvest `select`
      wrapEndp @"userStakes"  UserStakes          getUserStakes `select`
      wrapEndp @"scriptBalance" ScriptBalance     (const . scriptBalance)

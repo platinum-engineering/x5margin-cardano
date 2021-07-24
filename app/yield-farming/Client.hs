@@ -12,6 +12,7 @@ module Client
      , withdraw
      , contractBalance
      , walletBalance
+     , pendingReward
      , harvest
      , userStakes
      , Command (..)
@@ -46,6 +47,7 @@ data Command
     | Balance Int
     | ContractBalance
     | Harvest
+    | PendingReward Int
     | UserStakes Int
     deriving (Show, Read, Eq, Ord)
 
@@ -90,6 +92,16 @@ harvest = do
         POST
         (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "harvest")
         (ReqBodyJson $ YF.HarvestParams YF.adaAssetClass)
+        (Proxy :: Proxy (JsonResponse ()))
+        (port p)
+
+pendingReward :: PubKeyHash -> RIO ()
+pendingReward pkh = do
+    uuid <- asks ceUUID
+    endpoint "pendingReward" (const $ pure True) $ \host p -> req
+        POST
+        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "pendingReward")
+        (ReqBodyJson $ YF.PendingRewardParams pkh YF.adaAssetClass)
         (Proxy :: Proxy (JsonResponse ()))
         (port p)
 
