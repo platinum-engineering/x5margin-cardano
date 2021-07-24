@@ -91,6 +91,7 @@ library
             -Wno-prepositive-qualified-module
             -Wno-missing-safe-haskell-mode
             -Wno-unused-packages
+            -Wno-partial-fields
 
 
 executable yf-server

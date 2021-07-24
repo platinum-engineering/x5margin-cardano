@@ -101,6 +101,11 @@ data AssetClassTransferParams = AssetClassTransferParams {
 } deriving stock (Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
+data HarvestParams = HarvestParams {
+    hpAC     :: !AssetClass
+} deriving stock (Generic)
+  deriving anyclass (FromJSON, ToJSON, ToSchema)
+
 data TransferParams = TransferParams {
     actpAmounts :: !Value
 } deriving stock (Generic)
@@ -128,6 +133,16 @@ withdraw env AssetClassTransferParams{..} = do
         show pkh <> " withdrew " <> show actpAmount <> " of " <> if P.null tn then "ADA" else tn
     pure (pkh, actpAmount)
 
+harvest :: Env -> HarvestParams -> Contract w s Text PubKeyHash
+harvest env HarvestParams{..} = do
+    pkh <- pubKeyHash <$> Contract.ownPubKey
+    curSlot <- Contract.currentSlot
+    void $ mapErrorSM $ runStep (yfClient env) $ Harvest pkh curSlot hpAC
+    let tn = toString $ snd $ unAssetClass hpAC
+    logInfo $
+        show pkh <> " harvested rewards from " <> if P.null tn then "ADA" else tn <> " pool"
+    pure pkh
+
 scriptBalance :: Env -> Contract w s Text Value
 scriptBalance env = do
     let scrAddr = yieldFarmingAddress env
@@ -153,6 +168,7 @@ type YFOwnerEndpoints =
 type YFUserEndpoints =
         Endpoint "deposit"  AssetClassTransferParams
     .\/ Endpoint "withdraw" AssetClassTransferParams
+    .\/ Endpoint "harvest" HarvestParams
     .\/ Endpoint "scriptBalance" ()
     -- .\/ Endpoint "transfer" TransferParams
 
@@ -165,12 +181,15 @@ data UserEndpointsReturn
     = Deposited PubKeyHash Integer
     | Withdrew PubKeyHash Integer
     | ScriptBalance Value
-    deriving (Show, Generic, FromJSON, ToJSON)
+    | Harvested PubKeyHash
+    deriving stock (Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
 
 userEndpoints :: Env -> Contract (Last UserEndpointsReturn) YFUserEndpoints Text ()
 userEndpoints env =
     (wrapEndp @"deposit"  (P.uncurry Deposited)  deposit `select`
      wrapEndp @"withdraw" (P.uncurry Withdrew)   withdraw  `select`
+     wrapEndp @"harvest" Harvested               harvest `select`
      wrapEndp @"scriptBalance" ScriptBalance     (const . scriptBalance)
     ) >>
     userEndpoints env

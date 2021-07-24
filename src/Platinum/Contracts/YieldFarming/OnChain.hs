@@ -4,7 +4,7 @@ import           Ledger                         (PubKeyHash, ScriptContext (..),
                                                  Extended (..), Interval (..), to, member, txInfoValidRange,
                                                  LowerBound (..))
 import           Ledger.TimeSlot                (posixTimeRangeToSlotRange)
-import           Plutus.V1.Ledger.Value         (Value, AssetClass, TokenName, CurrencySymbol, assetClass,
+import           Plutus.V1.Ledger.Value         (Value, AssetClass, assetClass,
                                                  assetClassValue, flattenValue, assetClassValueOf)
 import           Plutus.V1.Ledger.Address       (Address, scriptAddress)
 import qualified Ledger.Constraints             as Con
@@ -36,82 +36,87 @@ stateTransition env s MkTransfer{..} = do
     let changes = flattenValue tAmount
     let handleAssetClass
             :: (TxConstraints Void Void, YieldFarmingDatum, Value)
-            -> (CurrencySymbol, TokenName, Integer)
+            -> (AssetClass, Integer)
             -> Maybe (TxConstraints Void Void, YieldFarmingDatum, Value)
-        handleAssetClass (constraints, yd, totRewards) (c, t, am) = do
-            let ac = assetClass c t
-            pool <- AMap.lookup ac $ yfdPools yd
-            -- Update pool's rewared-per-share and last slot with submitted slot
-            updatedPool <- updatePool tSlot (pool, assetClassValueOf poolFunds ac)
-            (userConstraint, newUsers, userReward) <-
-                handleAssetClassTransferNRewardUser
+        handleAssetClass (constraints, yd, totRewards) (ac, am) = do
+            (userConstraint, userReward, newDatum) <-
+                transferNRewardUser
                     env
                     tSender
                     (ac, am)
-                    (piRewardsPerShare updatedPool)
-                    (yfdUsers yd)
+                    tSlot
+                    (yd, assetClassValueOf poolFunds ac)
+
             return (
                 constraints <> userConstraint,
-                YieldFarmingDatum {
-                    yfdPools = AMap.insert ac updatedPool $ yfdPools yd,
-                    yfdUsers = newUsers
-                },
-                totRewards + userReward
-                )
+                newDatum,
+                totRewards + userReward)
     (constraints, newDatum, totRewards) <-
         foldlM
             handleAssetClass
             (Con.mustBeSignedBy tSender, datum, mempty)
-            changes
-    Just (constraints,
-          State newDatum (poolFunds <> tAmount <> scale (-1) totRewards <> subThrToken))
+            (map (\(cs, tn, am) -> (assetClass cs tn, am)) changes)
+    pure (constraints,
+            State newDatum (poolFunds <> tAmount <> scale (-1) totRewards <> subThrToken))
+stateTransition env s Harvest{..} = do
+    let subThrToken = assetClassValue (envThreadToken env) (negate 1)
+    let datum = stateData s
+    let poolFunds = stateValue s
 
--- | Recompute reward-per-share value: add accumulated reward between
--- last known slot and current slot.
--- Also update last known slot.
-{-# INLINABLE updatePool #-}
-updatePool :: Slot -> (PoolInfo, Integer) -> Maybe PoolInfo
-updatePool slot (pInfo, totalSupplyInPool)
-  | piSlotWhenRewardUpdated pInfo > slot = Nothing
-  | otherwise = Just $ PoolInfo {
-     piRewardsPerShare =
-         piRewardsPerShare pInfo +
-         if totalSupplyInPool > 0 then
-             getSlot (slot - piSlotWhenRewardUpdated pInfo) * rewardPerSlot % totalSupplyInPool
-         else fromInteger 0,
-     piSlotWhenRewardUpdated = slot
-  }
+    -- Harvest equivalent to deposit of 0 amount
+    (constraints, rewards, newDatum) <-
+        transferNRewardUser
+            env
+            hUser (hPoolAC, 0)
+            hSlot
+            (datum, assetClassValueOf poolFunds hPoolAC)
+
+    pure (constraints,
+            State newDatum (poolFunds <> scale (-1) rewards <> subThrToken))
 
 -- | Update user amount of current asset class.
 -- Also recompute user's reward correction in order to assess future reward payouts.
-{-# INLINABLE handleAssetClassTransferNRewardUser #-}
-handleAssetClassTransferNRewardUser
+{-# INLINABLE transferNRewardUser #-}
+transferNRewardUser
     :: Env
     -- ^ Environment of the contract
     -> PubKeyHash
     -> (AssetClass, Integer)
-    -> Rational
-    -- ^ Reward per share of pool corresponding to asset class
-    -> AMap.Map PubKeyHash UserInfo
-    -> Maybe (TxConstraints Void Void, AMap.Map PubKeyHash UserInfo, Value)
-handleAssetClassTransferNRewardUser Env{..} sender (ac, transfered) rewardPerShare users = do
+    -> Slot
+    -- ^ Right bound of slot interval to fetch reward for
+    -> (YieldFarmingDatum, Integer)
+    -- ^ Datum and total funds in the pool corresponding to the asset class
+    -> Maybe (TxConstraints Void Void, Value, YieldFarmingDatum)
+transferNRewardUser Env{..} sender (ac, transfered) upToSlot (yd, totalPoolSupply) = do
+    pool <- AMap.lookup ac $ yfdPools yd
+    -- Update pool's rewared-per-share and last slot with submitted slot
+    updatedPool <- updatePool upToSlot (pool, totalPoolSupply)
+    let rewardPerShare = piRewardsPerShare updatedPool
+
+    let users = yfdUsers yd
     let user = lookupDefault (UserInfo (fromInteger 0) mempty) sender users
     let userAmount = assetClassValueOf (uiAmounts user) ac
-    -- Check if the user has enough funds after this transfer
+    -- Check if the user has enough funds of the passed asset class after this transfer
     let newUserAmount = userAmount + transfered
     guard (newUserAmount >= 0)
 
     let updatedUser = UserInfo {
+            -- TODO should be changed with multiassets
             uiRewardExcess = fromInteger newUserAmount * rewardPerShare,
             uiAmounts      = assetClassValue ac transfered <> uiAmounts user
         }
 
-    -- Remove user from map, if there are no their token in the pool anymore.
-    let newUsers =
-            if newUserAmount > 0 then AMap.insert sender updatedUser users
-            else AMap.delete sender users
-    let (rewardConstr, rewardAmount) = rewardTxConstraint user
-    return (transferTxConstraint <> rewardConstr, newUsers, rewardAmount)
+    let newDatum = YieldFarmingDatum {
+            yfdPools = AMap.insert ac updatedPool $ yfdPools yd,
+            -- Remove user from map, if there are no their token in the pool anymore.
+            -- TODO newUserAmount > 0 should be changed with multiassets, to check if resulting value is mempty
+            yfdUsers =
+                if newUserAmount > 0 then AMap.insert sender updatedUser users
+                else AMap.delete sender users
+        }
+
+    let (rewardConstr, rewardAmount) = rewardTxConstraint rewardPerShare user
+    return (transferTxConstraint <> rewardConstr, rewardAmount, newDatum)
   where
     transferTxConstraint :: TxConstraints Void Void
     transferTxConstraint
@@ -119,15 +124,15 @@ handleAssetClassTransferNRewardUser Env{..} sender (ac, transfered) rewardPerSha
         --     Con.mustPayToTheScript sender $ assetClassValue ac transfered
         -- because out type of TxConstraints becomes PubKeyHash,
         -- and it doesn't match with TxConstraints Void Void of 'smTransition'.
-        | transfered > 0 = mempty
+        | transfered >= 0 = mempty
         | transfered < 0 =
             Con.mustPayToPubKey sender $ assetClassValue ac (negate transfered)
         | otherwise = mempty
 
     -- | Build TxContraint which checks that user is paid a reward
     -- for currently stacked amount
-    rewardTxConstraint :: UserInfo -> (TxConstraints Void Void, Value)
-    rewardTxConstraint user =
+    rewardTxConstraint :: Rational -> UserInfo -> (TxConstraints Void Void, Value)
+    rewardTxConstraint rewardPerShare user =
         let userAmount = assetClassValueOf (uiAmounts user) ac in
 
         -- Reward for current user amount for an interval of slots,
@@ -140,25 +145,39 @@ handleAssetClassTransferNRewardUser Env{..} sender (ac, transfered) rewardPerSha
         -- If user didn't have any tokens before then send nothing.
         if userAmount > 0 then
             (Con.mustPayToPubKey sender outstandingReward, outstandingReward)
-            --(mempty, outstandingReward)
         else
             (mempty, mempty)
 
+    -- | Recompute reward-per-share value: add accumulated reward between
+    -- last known slot and current slot.
+    -- Also update last known slot.
+    updatePool :: Slot -> (PoolInfo, Integer) -> Maybe PoolInfo
+    updatePool slot (pInfo, totalSupplyInPool)
+        | piSlotWhenRewardUpdated pInfo > slot = Nothing
+        | otherwise = Just $ PoolInfo {
+            piRewardsPerShare =
+                piRewardsPerShare pInfo +
+                if totalSupplyInPool > 0 then
+                    getSlot (slot - piSlotWhenRewardUpdated pInfo) * rewardPerSlot % totalSupplyInPool
+                else fromInteger 0,
+            piSlotWhenRewardUpdated = slot
+        }
+
 {-# INLINABLE domainChecks #-}
 domainChecks :: YieldFarmingDatum -> YieldFarmingRedeemer -> ScriptContext -> Bool
-domainChecks _ MkTransfer{..} ctx = True
-    -- TODO limit reward slot somehow
+domainChecks _ _ _ = True
+    -- TODO check reward slot somehow
     -- check slot correspondence
     -- traceIfFalse "tSlot is out of acceptable bounds" slotInAcceptableBounds
-  where
-      txInfo = scriptContextTxInfo ctx
-      validRange = posixTimeRangeToSlotRange (txInfoValidRange txInfo)
+  -- where
+    --   txInfo = scriptContextTxInfo ctx
+    --   validRange = posixTimeRangeToSlotRange (txInfoValidRange txInfo)
 
-      -- lower bound must be finite and [lower bound; lower bound + 20] has to contain tSlot
-      slotInAcceptableBounds :: Bool
-      slotInAcceptableBounds = case ivFrom validRange of
-          LowerBound (Finite l) _ -> tSlot `member` to (l + Slot requestValidityIntervalLength)
-          _        -> False
+    --   -- lower bound must be finite and [lower bound; lower bound + 20] has to contain tSlot
+    --   slotInAcceptableBounds :: Bool
+    --   slotInAcceptableBounds = case ivFrom validRange of
+    --       LowerBound (Finite l) _ -> tSlot `member` to (l + Slot requestValidityIntervalLength)
+    --       _        -> False
 
 {-# INLINABLE yieldFarmingStateMachine #-}
 yieldFarmingStateMachine :: Env -> StateMachine YieldFarmingDatum YieldFarmingRedeemer
@@ -208,6 +227,7 @@ emptyPoolInfo creationSlot = PoolInfo {
 }
 
 data UserInfo = UserInfo {
+    -- | TODO 'uiRewardExcess' should be stored for every user's asset class
     uiRewardExcess :: !Rational,
     uiAmounts      :: !Value
 } deriving stock (Prelude.Show)
@@ -227,6 +247,12 @@ data YieldFarmingRedeemer
         tAmount :: !Value,
         -- | Slot when the operation should performed
         tSlot   :: !Slot
+    }
+    | Harvest {
+        hUser   :: !PubKeyHash,
+        hSlot   :: !Slot,
+        -- | What pool rewards should be taken from.
+        hPoolAC :: !AssetClass
     }
 
 data YieldFarming
