@@ -12,6 +12,7 @@ module Client
      , withdraw
      , contractBalance
      , walletBalance
+     , walletPublicKey
      , pendingReward
      , harvest
      , userStakes
@@ -49,6 +50,7 @@ data Command
     | Harvest
     | PendingReward Int
     | UserStakes Int
+    | PublicKey
     deriving (Show, Read, Eq, Ord)
 
 data YfClientEnv = YfClientEnv {
@@ -120,7 +122,7 @@ contractBalance = do
     uuid <- asks ceUUID
     endpoint "contractBalance" (const $ pure True) $ \host p -> req
         POST
-        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "scriptBalance")
+        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "contractBalance")
         (ReqBodyJson ())
         (Proxy :: Proxy (JsonResponse ()))
         (port p)
@@ -140,6 +142,16 @@ walletBalance walletId = do
                 NoReqBody
                 (Proxy :: Proxy (JsonResponse Value))
                 (port p)
+
+walletPublicKey :: RIO ()
+walletPublicKey = do
+    uuid <- asks ceUUID
+    endpoint "publicKey" (const $ pure True) $ \host p -> req
+        POST
+        (baseUrlInstance host /: pack (show uuid) /: "endpoint" /: "publicKey")
+        (ReqBodyJson ())
+        (Proxy :: Proxy (JsonResponse ()))
+        (port p)
 
 endpoint
     :: HttpResponse resp

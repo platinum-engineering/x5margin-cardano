@@ -58,7 +58,7 @@ stateTransition env s MkTransfer{..} = do
             (map (\(cs, tn, am) -> (assetClass cs tn, am)) changes)
     pure (constraints,
             State newDatum (poolFunds <> tAmount <> scale (-1) totRewards <> subThrToken))
-stateTransition env s Harvest{..} = do
+stateTransition env s MkHarvest{..} = do
     let subThrToken = assetClassValue (envThreadToken env) (negate 1)
     let datum = stateData s
     let poolFunds = stateValue s
@@ -248,7 +248,7 @@ data YieldFarmingRedeemer
         -- | Slot when the operation should performed
         tSlot   :: !Slot
     }
-    | Harvest {
+    | MkHarvest {
         hUser   :: !PubKeyHash,
         hSlot   :: !Slot,
         -- | What pool rewards should be taken from.

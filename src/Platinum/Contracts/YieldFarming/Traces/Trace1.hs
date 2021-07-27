@@ -43,14 +43,14 @@ trace = do
 
             callEndpoint @"deposit" h2 $
                 AssetClassTransferParams
-                { actpAC = adaAssetClass
+                { actpToken = adaAssetClass
                 , actpAmount = 10_000_000
                 }
             void $ Emulator.waitNSlots 10
 
             callEndpoint @"withdraw" h2 $
                 AssetClassTransferParams
-                { actpAC = adaAssetClass
+                { actpToken = adaAssetClass
                 , actpAmount = 1_000_000
                 }
             s <- Emulator.waitNSlots 1

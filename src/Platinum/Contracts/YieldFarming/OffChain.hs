@@ -99,19 +99,19 @@ initLP InitLPParams{..} = do
 -------------------------------------------------
 
 data AssetClassTransferParams = AssetClassTransferParams {
-    actpAC     :: !AssetClass,
+    actpToken  :: !AssetClass,
     actpAmount :: !Integer
 } deriving stock (Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 data HarvestParams = HarvestParams {
-    hpTokenNameOfPool :: !AssetClass
+    hpToken :: !AssetClass
 } deriving stock (Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 data PendingRewardParams = PendingRewardParams {
-    prpPkh             :: PubKeyHash,
-    prpTokenNameOfPool :: !AssetClass
+    prpPkh   :: PubKeyHash,
+    prpToken :: !AssetClass
 } deriving stock (Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
@@ -125,8 +125,8 @@ deposit env AssetClassTransferParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
     curSlot <- Contract.currentSlot
     void $ mapErrorSM $ runStep (yfClient env) $
-        MkTransfer pkh (assetClassValue actpAC actpAmount) curSlot
-    let tn = toString $ snd $ unAssetClass actpAC
+        MkTransfer pkh (assetClassValue actpToken actpAmount) curSlot
+    let tn = toString $ snd $ unAssetClass actpToken
     logInfo $
         show pkh <> " deposited " <> show actpAmount <> " of " <> if P.null tn then "ADA" else tn
     pure (pkh, actpAmount)
@@ -136,8 +136,8 @@ withdraw env AssetClassTransferParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
     curSlot <- Contract.currentSlot
     void $ mapErrorSM $ runStep (yfClient env) $
-        MkTransfer pkh (assetClassValue actpAC (-actpAmount)) curSlot
-    let tn = toString $ snd $ unAssetClass actpAC
+        MkTransfer pkh (assetClassValue actpToken (-actpAmount)) curSlot
+    let tn = toString $ snd $ unAssetClass actpToken
     logInfo $
         show pkh <> " withdrew " <> show actpAmount <> " of " <> if P.null tn then "ADA" else tn
     pure (pkh, actpAmount)
@@ -145,19 +145,19 @@ withdraw env AssetClassTransferParams{..} = do
 harvest :: Env -> HarvestParams -> Contract w s Text PubKeyHash
 harvest env HarvestParams{..} = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
-    -- let tokenName = fromString $ if hpTokenNameOfPool == "ADA" then "" else hpTokenNameOfPool
+    -- let tokenName = fromString $ if hpToken == "ADA" then "" else hpToken
     -- m <- mapErrorSM $ getOnChainState client
     curSlot <- Contract.currentSlot
     void $ mapErrorSM $ runStep (yfClient env) $
-        Harvest pkh curSlot hpTokenNameOfPool
-    let tn = toString $ snd $ unAssetClass hpTokenNameOfPool
+        MkHarvest pkh curSlot hpToken
+    let tn = toString $ snd $ unAssetClass hpToken
     logInfo $
         show pkh <> " harvested rewards from " <> if P.null tn then "ADA" else tn <> " pool"
     pure pkh
 
 pendingReward :: Env -> PendingRewardParams -> Contract w s Text Value
 pendingReward env PendingRewardParams{..} = do
-    let ac = prpTokenNameOfPool
+    let ac = prpToken
     let tn = toString $ snd $ unAssetClass ac
     curSlot <- Contract.currentSlot
     m <- mapErrorSM $ getOnChainState (yfClient env)
@@ -192,20 +192,26 @@ getUserStakes env pkh = do
                 show pkh <> " stakes: " <> show res
             pure res
 
-scriptBalance :: Env -> Contract w s Text Value
-scriptBalance env = do
+contractBalance :: Env -> Contract w s Text Value
+contractBalance env = do
     let scrAddr = yieldFarmingAddress env
     utxo <- utxoAt scrAddr
     let res = snd $ head $ Map.toList $ Ledger.values $ Ledger.AddressMap $ Map.singleton scrAddr utxo
     logInfo $ "Script balance: " <> show res
     pure res
 
-transfer :: Env -> TransferParams -> Contract w s Text ()
-transfer env TransferParams{..} = do
+walletPubKey :: Contract w s Text PubKeyHash
+walletPubKey = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
-    curSlot <- Contract.currentSlot
-    void $ mapErrorSM $ runStep (yfClient env) $
-        MkTransfer pkh actpAmounts curSlot
+    logInfo $ "Wallet public key: " <> show pkh
+    pure pkh
+
+-- transfer :: Env -> TransferParams -> Contract w s Text ()
+-- transfer env TransferParams{..} = do
+--     pkh <- pubKeyHash <$> Contract.ownPubKey
+--     curSlot <- Contract.currentSlot
+--     void $ mapErrorSM $ runStep (yfClient env) $
+--         MkTransfer pkh actpAmounts curSlot
 
 -------------------------------------------------
 -- Off-chain machinery
@@ -220,7 +226,8 @@ type YFUserEndpoints =
     .\/ Endpoint "pendingReward" PendingRewardParams
     .\/ Endpoint "harvest" HarvestParams
     .\/ Endpoint "userStakes" PubKeyHash
-    .\/ Endpoint "scriptBalance" ()
+    .\/ Endpoint "contractBalance" ()
+    .\/ Endpoint "publicKey" ()
     -- .\/ Endpoint "transfer" TransferParams
 
 ownerEndpoints :: Contract (Last Env) YFOwnerEndpoints Text ()
@@ -229,23 +236,25 @@ ownerEndpoints = initLP' >> ownerEndpoints
     initLP' = handleError logError $ endpoint @"init"  >>= initLP
 
 data UserEndpointsReturn
-    = Deposited PubKeyHash Integer
-    | Withdrew PubKeyHash Integer
-    | ScriptBalance Value
+    = Deposit PubKeyHash Integer
+    | Withdraw PubKeyHash Integer
+    | ContractBalance Value
     | PendingReward Value
-    | Harvested PubKeyHash
+    | Harvest PubKeyHash
     | UserStakes Value
+    | PublicKey PubKeyHash
     deriving stock (Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
 userEndpoints :: Env -> Contract (Last UserEndpointsReturn) YFUserEndpoints Text ()
 userEndpoints env =
-    (wrapEndp @"deposit"  (P.uncurry Deposited)  deposit `select`
-     wrapEndp @"withdraw" (P.uncurry Withdrew)   withdraw  `select`
-     wrapEndp @"pendingReward"  PendingReward    pendingReward `select`
-     wrapEndp @"harvest"  Harvested              harvest `select`
-     wrapEndp @"userStakes"  UserStakes          getUserStakes `select`
-     wrapEndp @"scriptBalance" ScriptBalance     (const . scriptBalance)
+    (wrapEndp @"deposit"         (P.uncurry Deposit)  deposit `select`
+     wrapEndp @"withdraw"        (P.uncurry Withdraw) withdraw  `select`
+     wrapEndp @"pendingReward"   PendingReward        pendingReward `select`
+     wrapEndp @"harvest"         Harvest              harvest `select`
+     wrapEndp @"userStakes"      UserStakes           getUserStakes `select`
+     wrapEndp @"contractBalance" ContractBalance      (const . contractBalance) `select`
+     wrapEndp @"publicKey"       PublicKey            (const $ const $ walletPubKey)
     ) >>
     userEndpoints env
   where

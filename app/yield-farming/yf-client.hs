@@ -44,6 +44,7 @@ main = do
             Deposit amt  -> deposit amt
             Withdraw amt -> withdraw amt
             Balance walId  -> walletBalance walId
+            PublicKey -> walletPublicKey
             ContractBalance -> contractBalance
             PendingReward walId ->
                 pendingReward $ pubKeyHash $ walletPubKey $ Wallet $ fromIntegral walId
@@ -54,7 +55,7 @@ main = do
 
     readCommand :: IO Command
     readCommand = do
-        putStr "Enter command (deposit amt, withdraw amt, balance walletId, contractBalance, pendingReward walletId, harvest, userStakes walletId): "
+        putStr "Enter command (publicKey, deposit amt, withdraw amt, balance walletId, contractBalance, pendingReward walletId, harvest, userStakes walletId): "
         s <- getLine
         maybe (putStrLn "Couldn't parse command" >> readCommand) return $ readMaybe (capitalized s)
 
