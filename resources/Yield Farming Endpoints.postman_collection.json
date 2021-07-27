@@ -1,0 +1,384 @@
+{
+	"info": {
+		"_postman_id": "94cb7c27-e5b7-4f6a-97b4-ad2acb83f39b",
+		"name": "Platinum Contracts",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "YF Deposit",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"actpToken\":{\n        \"unAssetClass\":[{\"unCurrencySymbol\":\"\"},{\"unTokenName\":\"\"}]\n        },\n    \"actpAmount\":3333000000\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instance/9d2b09ff-5c54-46bc-aad8-875db5c38f07/endpoint/deposit",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instance",
+						"9d2b09ff-5c54-46bc-aad8-875db5c38f07",
+						"endpoint",
+						"deposit"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Withdraw",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"actpToken\":{\n        \"unAssetClass\":[{\"unCurrencySymbol\":\"\"},{\"unTokenName\":\"\"}]\n        },\n        \"actpAmount\": 2222000000\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instance/bc84ae9d-cf1b-4184-bcef-7a7fccf0655b/endpoint/withdraw",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instance",
+						"bc84ae9d-cf1b-4184-bcef-7a7fccf0655b",
+						"endpoint",
+						"withdraw"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Get Public Key",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "[]",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instance/9d2b09ff-5c54-46bc-aad8-875db5c38f07/endpoint/publicKey",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instance",
+						"9d2b09ff-5c54-46bc-aad8-875db5c38f07",
+						"endpoint",
+						"publicKey"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Contract Balance",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "[]",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instance/bc84ae9d-cf1b-4184-bcef-7a7fccf0655b/endpoint/contractBalance",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instance",
+						"bc84ae9d-cf1b-4184-bcef-7a7fccf0655b",
+						"endpoint",
+						"contractBalance"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Status Wallet 2",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instances/wallet/2",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instances",
+						"wallet",
+						"2"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Status Wallet 3",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instances/wallet/3",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instances",
+						"wallet",
+						"3"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Balance Wallet 2",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://65.21.248.182:8080/wallet/2/total-funds",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"wallet",
+						"2",
+						"total-funds"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Balance Wallet 3",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://65.21.248.182:8080/wallet/3/total-funds",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"wallet",
+						"3",
+						"total-funds"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Pending Reward",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"prpPkh\": {\n        \"getPubKeyHash\": \"39f713d0a644253f04529421b9f51b9b08979d08295959c4f3990ee617f5139f\"\n    },\n    \"prpToken\": {\n        \"unAssetClass\":[{\"unCurrencySymbol\":\"\"},{\"unTokenName\":\"\"}]\n    }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instance/9d2b09ff-5c54-46bc-aad8-875db5c38f07/endpoint/pendingReward",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instance",
+						"9d2b09ff-5c54-46bc-aad8-875db5c38f07",
+						"endpoint",
+						"pendingReward"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Get Wallet Stakes",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n        \"getPubKeyHash\": \"39f713d0a644253f04529421b9f51b9b08979d08295959c4f3990ee617f5139f\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instance/9d2b09ff-5c54-46bc-aad8-875db5c38f07/endpoint/userStakes",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instance",
+						"9d2b09ff-5c54-46bc-aad8-875db5c38f07",
+						"endpoint",
+						"userStakes"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "YF Harvest",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{ \n    \"hpToken\": {\n        \"unAssetClass\":[{\"unCurrencySymbol\":\"\"},{\"unTokenName\":\"\"}]\n    }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://65.21.248.182:8080/api/new/contract/instance/9d2b09ff-5c54-46bc-aad8-875db5c38f07/endpoint/harvest",
+					"protocol": "http",
+					"host": [
+						"65",
+						"21",
+						"248",
+						"182"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"new",
+						"contract",
+						"instance",
+						"9d2b09ff-5c54-46bc-aad8-875db5c38f07",
+						"endpoint",
+						"harvest"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
